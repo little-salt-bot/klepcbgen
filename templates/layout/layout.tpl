@@ -95,6 +95,8 @@
 
 {{nets}}
 
+{{edgecuts}}
+
 {{modules}}
 
 {{controlcircuit}}

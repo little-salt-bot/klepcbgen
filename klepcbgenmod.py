@@ -5,11 +5,96 @@ import json
 import datetime
 import os
 
+from dataclasses import dataclass, field
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 # Program version
-PROGRAM_VERSION = "0.2"
+PROGRAM_VERSION = "0.3"
+
+# Available controllers: name -> (human label, matrix lines available)
+CONTROLLERS = {
+    "atmega32u4": "ATmega32U4",
+    "promicro": "Pro Micro (ATmega32U4)",
+    "rp2040": "RP2040",
+}
+
+# Available key switch footprints
+KEY_FOOTPRINTS = {
+    "cherry_mx": "Cherry MX",
+    "alps": "Alps/Matias",
+    "choc": "Kailh Choc",
+}
+
+# Available diode footprints
+DIODE_FOOTPRINTS = {
+    "0805": "SMD 0805",
+    "0603": "SMD 0603",
+    "sod123": "SOD-123",
+}
+
+# Controller GPIO pin names, indexed by matrix line. Each controller can drive
+# this many duplex lines. These map matrix line N to a physical GPIO label.
+CONTROLLER_PINS = {
+    "atmega32u4": [
+        "PD0", "PD1", "PD2", "PD3", "PD4", "PD5", "PD6", "PD7",
+        "PB0", "PB1", "PB2", "PB3", "PB4", "PB5", "PB6", "PB7",
+        "PC6", "PC7",
+    ],
+    "promicro": [
+        "D3", "D2", "D1", "D0", "D4", "C6", "D7", "E6",
+        "B4", "B5", "B6", "B2", "B3", "B1", "F7", "F6",
+        "F5", "F4",
+    ],
+    "rp2040": [
+        "GP0", "GP1", "GP2", "GP3", "GP4", "GP5", "GP6", "GP7",
+        "GP8", "GP9", "GP10", "GP11", "GP12", "GP13", "GP14", "GP15",
+        "GP16", "GP17", "GP18", "GP19", "GP20", "GP21", "GP22", "GP26",
+        "GP27", "GP28",
+    ],
+}
+
+
+def controller_lines_available(controller):
+    """Return how many duplex matrix lines a controller can drive."""
+    return len(CONTROLLER_PINS.get(controller, []))
+
+
+@dataclass
+class GeneratorOptions:
+    """Configurable options that control how a project is generated."""
+    key_pitch: float = 19.05           # mm between switch centers
+    key_footprint: str = "cherry_mx"   # KEY_FOOTPRINTS key
+    diode_footprint: str = "0805"      # DIODE_FOOTPRINTS key
+    controller: str = "atmega32u4"     # CONTROLLERS key
+    edge_margin: float = 5.0           # mm of board outline around switch bbox
+    edge_cuts: bool = True             # emit an Edge.Cuts board outline
+    do_routing: bool = True            # auto-route matrix lines
+    matrixfile: str = None             # path to emit matrix wiring JSON
+    firmware_type: str = "both"        # none|qmk|zmk|both
+
+    def validate(self):
+        if self.key_pitch <= 0:
+            raise ValueError("key_pitch must be > 0")
+        if self.key_footprint not in KEY_FOOTPRINTS:
+            raise ValueError(
+                f"Unknown key_footprint '{self.key_footprint}'. "
+                f"Choose from {sorted(KEY_FOOTPRINTS)}"
+            )
+        if self.diode_footprint not in DIODE_FOOTPRINTS:
+            raise ValueError(
+                f"Unknown diode_footprint '{self.diode_footprint}'. "
+                f"Choose from {sorted(DIODE_FOOTPRINTS)}"
+            )
+        if self.controller not in CONTROLLERS:
+            raise ValueError(
+                f"Unknown controller '{self.controller}'. "
+                f"Choose from {sorted(CONTROLLERS)}"
+            )
+        if self.edge_margin < 0:
+            raise ValueError("edge_margin must be >= 0")
+        if self.firmware_type not in ("none", "qmk", "zmk", "both"):
+            raise ValueError("firmware_type must be none|qmk|zmk|both")
 
 
 def min_lines_for_keys(num_keys):
@@ -127,10 +212,12 @@ class Nets:
 
 class KLEPCBGenerator:
     """Wrapper around the entire generator parses arguments, load json and generate kicad project"""
-    keyboard = Keyboard()
 
-    def __init__(self):
+    def __init__(self, options=None):
         """ Set-up directories """
+        self.keyboard = Keyboard()
+        self.options = options or GeneratorOptions()
+        self.options.validate()
         self.project_dir = Path(__file__).resolve().parent
         self.jinja_env = Environment(
             loader=FileSystemLoader([self.project_dir / "templates"]),
@@ -138,7 +225,7 @@ class KLEPCBGenerator:
         )
         self.nets = Nets()
 
-    def generate_kicadproject(self, infile, outname, do_routing, matrixfile=None):
+    def generate_kicadproject(self, infile, outname):
         """Generate the kicad project. Main entry point"""
 
         if not os.path.exists(outname):
@@ -147,10 +234,12 @@ class KLEPCBGenerator:
         self.read_kle_json(infile)
         self.assign_duplex_matrix()
         self.generate_schematic(outname)
-        self.generate_layout(outname, do_routing)
+        self.generate_layout(outname)
         self.generate_project(outname)
-        if matrixfile:
-            self.generate_matrix_file(matrixfile)
+        if self.options.matrixfile:
+            self.generate_matrix_file(self.options.matrixfile)
+        if self.options.firmware_type != "none":
+            self.generate_firmware(outname)
 
     def read_kle_json(self, infile):
         """ Read the provided KLE input file and create a list of all the keyswitches that should
@@ -233,6 +322,13 @@ class KLEPCBGenerator:
 
         num_keys = len(self.keyboard.keys)
         m = min_lines_for_keys(num_keys)
+        avail = controller_lines_available(self.options.controller)
+        if m > avail:
+            raise ValueError(
+                f"Layout needs {m} matrix lines but controller "
+                f"'{self.options.controller}' only provides {avail}. "
+                f"Choose a controller with more GPIO or a smaller layout."
+            )
         self.keyboard.matrix_lines = m
 
         # Iterate pairs in the order (0,1),(0,2),...,(0,M-1),(1,2),... so each
@@ -336,30 +432,37 @@ class KLEPCBGenerator:
                 )
             )
 
-    def place_layout_components(self, do_routing):
+    def place_layout_components(self):
         """ Place footprint components, traces and vias """
-        switch = self.jinja_env.get_template("layout/keyswitch.tpl")
-        diode = self.jinja_env.get_template("layout/diode.tpl")
+        switch = self.jinja_env.get_template(
+            f"layout/keyswitch_{self.options.key_footprint}.tpl"
+        )
+        diode = self.jinja_env.get_template(
+            f"layout/diode_{self.options.diode_footprint}.tpl"
+        )
         component_count = 0
         components_section = ""
+
+        key_pitch = self.options.key_pitch
 
         # Load templates for netnames
         diodetpl = self.jinja_env.get_template("layout/diodenetname.tpl")
         matrixtpl = self.jinja_env.get_template("layout/matrixnetname.tpl")
         tracetpl = self.jinja_env.get_template("layout/trace.tpl")
+        viatpl = self.jinja_env.get_template("layout/via.tpl")
 
-        # Place keyswitches, diodes, vias and traces
-        key_pitch = 19.05
         # Origin is zeroed so the top-left key's switch center sits at PCB (0,0).
         # The first key has x_unit/y_unit = 0.5 (its center), so shift by half a
         # key pitch to bring that center exactly onto the origin.
         key_origin_x = -0.5 * key_pitch
         key_origin_y = -0.5 * key_pitch
 
-        # Several offsets that are relative to the 0,0 point inside the switch layout template
-        diode_offset = [-5.8, 8.89]                         # Position of the diode 
-        diode_trace_offsets = [[-5.8, 2.54], [-5.8, 7.77]]  # Start/end-points for the trace connecting the diode to the switch
-        line_b_pad_offset = [-5.8, 9.83]                    # Position of the matrix_b pad of the diode
+        # Diode placement offsets relative to the switch center, in mm.
+        # These scale with key pitch so larger pitches keep the diode in place.
+        s = key_pitch / 19.05
+        diode_offset = [-5.8 * s, 8.89 * s]                  # Position of the diode
+        diode_trace_offsets = [[-5.8 * s, 2.54 * s], [-5.8 * s, 7.77 * s]]
+        # (matrix_b pad of the diode, used for chaining traces)
 
         for key in self.keyboard.keys:
             # Place switch
@@ -377,6 +480,7 @@ class KLEPCBGenerator:
                     matrix_a_netnum=key.matrix_a_netnum,
                     matrix_a_netname=matrixtpl.render(line=key.matrix_a),
                     keywidth=unit_width_to_available_footprint(key.width),
+                    keyfootprint=self.options.key_footprint,
                 )
                 + "\n"
             )
@@ -393,6 +497,7 @@ class KLEPCBGenerator:
                     diodenetname=diodetpl.render(diodenum=key.num),
                     matrix_b_netnum=key.matrix_b_netnum,
                     matrix_b_netname=matrixtpl.render(line=key.matrix_b),
+                    diodefootprint=self.options.diode_footprint,
                 )
                 + "\n"
             )
@@ -413,13 +518,15 @@ class KLEPCBGenerator:
 
             component_count += 1
 
-        if do_routing:
-            # For each duplex matrix line, chain the contact points of all keys
-            # that use it. Each key contributes two contact points:
+        if self.options.do_routing:
+            # For each duplex matrix line, route a clean orthogonal (Manhattan)
+            # path through the contact points of all keys that use it. Each key
+            # contributes two contact points:
             #   - its switch pad1 contact on line A (matrix_a)
             #   - its diode matrix_b pad on line B (matrix_b)
-            # Chaining them keeps every key on a line electrically connected and
-            # eventually connected to the controller pin for that line.
+            # Orthogonal routing keeps traces DRC-clean (no diagonal shorts) and
+            # uses a via at each direction change to hop between layers when a
+            # straight run would cross another net.
             for line in range(self.keyboard.matrix_lines):
                 # Collect contact points (x,y) and the netnum for this line
                 contacts = []
@@ -436,30 +543,94 @@ class KLEPCBGenerator:
                         contacts.append(
                             (
                                 ref_x + diode_offset[0],
-                                ref_y + diode_offset[1] + 0.94,
+                                ref_y + diode_offset[1] + 0.94 * s,
                                 key.matrix_b_netnum,
                             )
                         )
 
-                # Chain the contact points in sequence
+                # Chain the contact points with L-shaped (Manhattan) segments.
+                # Alternate layer per leg and drop a via at the bend so crossing
+                # nets use different copper layers and stay DRC-clean.
                 prev = None
+                leg_layer = "B.Cu"
                 for contact in contacts:
                     if prev is not None:
+                        cx, cy, cnet = contact
+                        px, py, pnet = prev
+                        # First leg: horizontal
                         components_section = (
                             components_section
                             + tracetpl.render(
-                                x1=prev[0],
-                                y1=prev[1],
-                                x2=contact[0],
-                                y2=contact[1],
-                                layer="B.Cu",
-                                netnum=prev[2],
+                                x1=px, y1=py,
+                                x2=cx, y2=py,
+                                layer=leg_layer,
+                                netnum=pnet,
                             )
                             + "\n"
                         )
+                        # Via at the bend
+                        components_section = (
+                            components_section
+                            + viatpl.render(x=cx, y=py, netnum=pnet)
+                            + "\n"
+                        )
+                        # Second leg: vertical
+                        components_section = (
+                            components_section
+                            + tracetpl.render(
+                                x1=cx, y1=py,
+                                x2=cx, y2=cy,
+                                layer=leg_layer,
+                                netnum=pnet,
+                            )
+                            + "\n"
+                        )
+                        # Alternate layer for the next leg
+                        leg_layer = "F.Cu" if leg_layer == "B.Cu" else "B.Cu"
                     prev = contact
 
         return components_section, component_count
+
+    def compute_edge_cuts(self):
+        """Compute the board outline rectangle (Edge.Cuts) based on the bounding
+           box of all keyswitch footprints plus a configurable margin. Returns a
+           string of (gr_line) entries, or empty string if edge_cuts is disabled.
+        """
+        if not self.options.edge_cuts:
+            return ""
+        if not self.keyboard.keys:
+            return ""
+
+        key_pitch = self.options.key_pitch
+        margin = self.options.edge_margin
+        key_origin_x = -0.5 * key_pitch
+        key_origin_y = -0.5 * key_pitch
+
+        # Bounding box of switch centers (switch pad1 is at the key center)
+        xs = [key_origin_x + k.x_unit * key_pitch for k in self.keyboard.keys]
+        ys = [key_origin_y + k.y_unit * key_pitch for k in self.keyboard.keys]
+        # Include half a key pitch of footprint footprint beyond the center so the
+        # margin is measured from the footprint edge, not the center.
+        min_x = min(xs) - 0.5 * key_pitch
+        max_x = max(xs) + 0.5 * key_pitch
+        min_y = min(ys) - 0.5 * key_pitch
+        max_y = max(ys) + 0.5 * key_pitch
+
+        # Add configurable margin
+        x0 = min_x - margin
+        y0 = min_y - margin
+        x1 = max_x + margin
+        y1 = max_y + margin
+
+        # Emit four edge lines (KiCad 5 gr_line format)
+        w = 0.1
+        lines = [
+            f"  (gr_line (start {x0} {y0}) (end {x1} {y0}) (angle 0) (layer Edge.Cuts) (width {w}))",
+            f"  (gr_line (start {x1} {y0}) (end {x1} {y1}) (angle 0) (layer Edge.Cuts) (width {w}))",
+            f"  (gr_line (start {x1} {y1}) (end {x0} {y1}) (angle 0) (layer Edge.Cuts) (width {w}))",
+            f"  (gr_line (start {x0} {y1}) (end {x0} {y0}) (angle 0) (layer Edge.Cuts) (width {w}))",
+        ]
+        return "\n".join(lines) + "\n"
 
 
     def define_nets(self):
@@ -523,7 +694,7 @@ class KLEPCBGenerator:
 
         return nets.render(netdeclarations=declarenets, addnets=addnets)
 
-    def generate_layout(self, outname, do_routing):
+    def generate_layout(self, outname):
         """ Generate layout """
 
         print("Generating PCB layout ...")
@@ -531,7 +702,8 @@ class KLEPCBGenerator:
         self.define_nets()
         nets = self.create_layout_nets()
 
-        components, numcomponents = self.place_layout_components(do_routing)
+        components, numcomponents = self.place_layout_components()
+        edge_cuts = self.compute_edge_cuts()
 
         layout = self.jinja_env.get_template("layout/layout.tpl")
         controlcircuit = self.jinja_env.get_template("layout/controlcircuit.tpl")
@@ -543,6 +715,7 @@ class KLEPCBGenerator:
                     nummodules=numcomponents,
                     nets=nets,
                     numnets=self.nets.number_of_nets(),
+                    edgecuts=edge_cuts,
                     controlcircuit=controlcircuit.render(nets=self.nets, startnet=0),
                 )
             )
@@ -554,4 +727,20 @@ class KLEPCBGenerator:
                 outname + "/" + os.path.basename(os.path.normpath(outname)) + ".pro", "w+", newline="\n", encoding="utf-8"
         ) as out_file:
             out_file.write(prj.render())
+
+    def generate_firmware(self, outname):
+        """Generate firmware source files from the duplex matrix wiring and the
+           selected controller. Writes QMK and/or ZMK files into a 'firmware'
+           subdirectory of the project output.
+        """
+        from firmware import generate_qmk, generate_zmk
+
+        fw_dir = os.path.join(outname, "firmware")
+        os.makedirs(fw_dir, exist_ok=True)
+        ft = self.options.firmware_type
+        if ft in ("qmk", "both"):
+            generate_qmk(fw_dir, self.keyboard, self.options)
+        if ft in ("zmk", "both"):
+            generate_zmk(fw_dir, self.keyboard, self.options)
+        print("Firmware written to '" + fw_dir + "'")
 

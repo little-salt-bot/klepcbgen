@@ -44,9 +44,41 @@ Basic invocation:
 
 `python3 klepcbgen.py -o <outname> [options] <input.kle.json>`
 
+Options:
+
 * `-o <outname>` — directory and base name for output files (e.g. `-o id80` produces `id80/id80.sch`, `id80/id80.kicad_pcb`, `id80/id80.pro`)
 * `-m <matrixfile>` — additionally write a generic JSON file mapping each key to its `(matrix_a, matrix_b)` duplex matrix pair (for firmware). Example: `-m matrix.json`
 * `-n` — do not add traces connecting matrix lines
+* `--pitch <mm>` — distance between switch centers (default `19.05`)
+* `--key-footprint <cherry_mx|alps|choc>` — keyswitch footprint (default `cherry_mx`)
+* `--diode-footprint <0805|0603|sod123>` — diode footprint (default `0805`)
+* `--controller <atmega32u4|promicro|rp2040>` — target controller (default `atmega32u4`)
+* `--edge-margin <mm>` — board outline margin around outermost keyswitch footprints (default `5.0`)
+* `--no-edge-cuts` — do not emit a board outline
+* `--firmware <none|qmk|zmk|both>` — generate firmware source from the matrix (default `both`)
+
+### Web UI
+
+A web interface is included: paste KLE JSON, pick options, and download the
+generated project + a live PCB thumbnail.
+
+`uvicorn webui:app --host 0.0.0.0 --port 8000`
+
+### Docker
+
+Build and run the CLI:
+
+```
+docker build -t klepcbgen .
+docker run -v $(pwd)/out:/out -v $(pwd)/layout.json:/in/layout.json \
+  klepcbgen -o /out/mykb -m /out/matrix.json /in/layout.json
+```
+
+Run the web UI in a container:
+
+```
+docker run -p 8000:8000 --entrypoint uvicorn klepcbgen webui:app --host 0.0.0.0 --port 8000
+```
 
 ## Kicad 6
 
