@@ -26,7 +26,7 @@
       (effects (font (size 0.5 0.5) (thickness 0.08)) (justify mirror))
     )
     (pad 1 smd roundrect (at -1.025 0 90) (size 1.15 1.4) (layers B.Cu B.Paste B.Mask) (roundrect_rratio 0.217391)
-      (net {{rownetnum}} {{rownetname}}))
+      (net {{matrix_b_netnum}} {{matrix_b_netname}}))
     (pad 2 smd roundrect (at 1.025 0 90) (size 1.15 1.4) (layers B.Cu B.Paste B.Mask) (roundrect_rratio 0.217391)
       (net {{diodenetnum}} {{diodenetname}}))
     (model ${KISYS3DMOD}/Diode_SMD.3dshapes/D_0805_2012Metric.wrl

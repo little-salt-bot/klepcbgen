@@ -22,8 +22,9 @@ a keyboard designed using the Keyboard Layout Editor \
     )
 
     parser.add_argument(
-        "-c", dest="colgroup", choices=['seq', 'pos'], default='seq',
-        help="Select the algorithm for grouping keys into columns"
+        "-m", dest="matrixfile", default=None,
+        help='Path to write the duplex matrix wiring as a JSON file (e.g. "matrix.json"). '
+             'This file maps each key to its (matrix_a, matrix_b) duplex line pair for firmware.',
     )
 
     parser.add_argument(
@@ -50,5 +51,5 @@ a keyboard designed using the Keyboard Layout Editor \
 if __name__ == "__main__":
     arguments = parse_command_line_arguments()
     kbpcbgen = KLEPCBGenerator()
-    kbpcbgen.generate_kicadproject(arguments.infile, arguments.outname, arguments.routing, arguments.colgroup)
+    kbpcbgen.generate_kicadproject(arguments.infile, arguments.outname, arguments.routing, arguments.matrixfile)
     kbpcbgen.keyboard.print_key_info()

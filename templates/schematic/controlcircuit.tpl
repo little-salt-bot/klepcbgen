@@ -162,55 +162,33 @@ F 3 "http://ww1.microchip.com/downloads/en/DeviceDoc/Atmel-7766-8-bit-AVR-ATmega
 	0    -1   -1   0   
 $EndComp
 Text Label 7000 7900 1    50   ~ 0
-Col_16
+Matrix_6
 Text Label 7100 7900 1    50   ~ 0
-Col_15
+Matrix_5
 Text Label 7200 7900 1    50   ~ 0
-Col_14
+Matrix_4
 Text Label 7300 7900 1    50   ~ 0
-Col_13
+Matrix_3
 Text Label 7400 7900 1    50   ~ 0
-Col_12
+Matrix_2
 Text Label 7500 7900 1    50   ~ 0
-Col_11
+Matrix_1
 Text Label 5600 7900 1    50   ~ 0
-Row_0
+Matrix_12
 Text Label 5500 7900 1    50   ~ 0
-Row_1
+Matrix_11
 Text Label 5200 7900 1    50   ~ 0
-Row_2
+Matrix_9
 Text Label 5100 7900 1    50   ~ 0
-Row_3
-Text Label 5000 7900 1    50   ~ 0
-Row_4
+Matrix_8
 Text Label 6500 7900 1    50   ~ 0
-Row_5
-Text Label 6400 7900 1    50   ~ 0
-Row_6
+Matrix_13
 Text Label 6200 7900 1    50   ~ 0
-Col_10
-Text Label 6300 7900 1    50   ~ 0
-Col_9
+Matrix_7
 Text Label 6100 7900 1    50   ~ 0
-Col_8
+Matrix_0
 Text Label 6000 7900 1    50   ~ 0
-Col_7
-Text Label 5900 7900 1    50   ~ 0
-Col_6
-Text Label 5800 7900 1    50   ~ 0
-Col_5
-Text Label 5300 7900 1    50   ~ 0
-Col_4
-Text Label 4900 7900 1    50   ~ 0
-Col_3
-Text Label 4800 7900 1    50   ~ 0
-Col_2
-Text Label 4700 7900 1    50   ~ 0
-Col_1
-Text Label 4600 7900 1    50   ~ 0
-Col_0
-Text Label 6800 7900 1    50   ~ 0
-Col_17
+Matrix_10
 $Comp
 L power:GND #PWR0106
 U 1 1 5E98552C
@@ -490,11 +468,11 @@ Reset
 Text Label 4600 9100 3    50   ~ 0
 Reset
 Text Label 7600 10050 2    50   ~ 0
-Col_2
+Matrix_2
 Text Label 8100 10050 0    50   ~ 0
-Col_1
+Matrix_1
 Text Label 8100 9950 0    50   ~ 0
-Col_3
+Matrix_3
 $Comp
 L power:GND #PWR?
 U 1 1 6015E4D5

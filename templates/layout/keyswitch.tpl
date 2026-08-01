@@ -34,7 +34,7 @@
     (pad 2 thru_hole circle (at -6.35 2.54) (size 2.2 2.2) (drill 1.5) (layers *.Cu *.Mask)
       (net {{diodenetnum}} {{diodenetname}}))
     (pad 1 thru_hole circle (at 0 0) (size 2.2 2.2) (drill 1.5) (layers *.Cu *.Mask)
-      (net {{colnetnum}} {{colnetname}}))
+      (net {{matrix_a_netnum}} {{matrix_a_netname}}))
     (model ${KISYS3DMOD}/Button_Switch_Keyboard.3dshapes/SW_Cherry_MX_{{keywidth}}u_PCB.wrl
       (at (xyz 0 0 0))
       (scale (xyz 1 1 1))

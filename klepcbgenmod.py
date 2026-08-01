@@ -4,57 +4,37 @@ import sys
 import json
 import datetime
 import os
-import math
 
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 # Program version
-PROGRAM_VERSION = "0.1"
+PROGRAM_VERSION = "0.2"
 
-# Constants
-MAX_ROWS = 7
-MAX_COLS = 18
 
-class KeyBlockCollection:
-    """Maintains a collection of blocks of keyboard keys, such as columns or rows"""
-    def __init__(self):
-        self.blocks = []
+def min_lines_for_keys(num_keys):
+    """Return the smallest number of bidirectional matrix lines M such that
+       M lines can uniquely address num_keys keys via M(M-1)/2 unordered pairs.
 
-    def add_key_to_block(self, block_index, key_index):
-        """Add a keyboard key to one of the blocks in the collection at the specified index.
-           If the block does not exist, it gets created at the specified index, inserting a
-           number of empty blocks if necessary"""
-        # Check if the block exists, and add a number of blocks if needed
-        blocks_to_add = (block_index + 1) - len(self.blocks)
-        if blocks_to_add > 0:
-            for _ in range(blocks_to_add):
-                self.blocks.append([])
-
-        self.blocks[block_index].append(key_index)
-
-    def get_block(self, block_index):
-        """Get the coimplete"""
-        return self.blocks[block_index]
-
+       This is the duplex (square) matrix pin budget: with M duplex GPIO lines
+       you can scan up to M(M-1)/2 keys, far fewer than the R+C of a classic
+       row/column matrix.
+    """
+    m = 0
+    while m * (m - 1) // 2 < num_keys:
+        m += 1
+    return m
 
 class Keyboard:
     """Represents an entire keyboard layout with all the keys positioned and
-       grouped in rows and columns"""
+       wired in a duplex (square) matrix. Each key is assigned a unique pair
+       (matrix_a, matrix_b) of bidirectional matrix lines, a<b."""
     def __init__(self):
         self.keys = []
-        self.rows = KeyBlockCollection()
-        self.columns = KeyBlockCollection()
         self.name = ""
         self.author = ""
-
-    def add_key_to_row(self, row_index, key_index):
-        """Add a key to a specific row"""
-        self.rows.add_key_to_block(row_index, key_index)
-
-    def add_key_to_col(self, col_index, key_index):
-        """Add a key to a specific column"""
-        self.columns.add_key_to_block(col_index, key_index)
+        self.matrix_lines = 0          # number of duplex matrix lines (GPIO)
+        self.matrix_pairs = {}         # key.num -> (a, b) unique unordered pair
 
     def print_key_info(self):
         """ Print information for this keyboard """
@@ -66,11 +46,11 @@ class Keyboard:
         print(
             "Contains: "
             + str(len(self.keys))
-            + " keys, grouped into "
-            + str(len(self.rows.blocks))
-            + " rows and "
-            + str(len(self.columns.blocks))
-            + " columns"
+            + " keys, wired in a duplex matrix using "
+            + str(self.matrix_lines)
+            + " lines (max "
+            + str(self.matrix_lines * (self.matrix_lines - 1) // 2)
+            + " keys)"
         )
 
 
@@ -80,12 +60,12 @@ class Key:
     y_unit = 0
     width = 0
     height = 0
-    row = 0
-    col = 0
     rot = 0
     diodenetnum = 0
-    colnetnum = 0
-    rownetnum = 0
+    matrix_a_netnum = 0
+    matrix_b_netnum = 0
+    matrix_a = 0
+    matrix_b = 0
     num = 0
     legend = "<N/A>"
 
@@ -158,17 +138,19 @@ class KLEPCBGenerator:
         )
         self.nets = Nets()
 
-    def generate_kicadproject(self, infile, outname, do_routing, colgrouping):
+    def generate_kicadproject(self, infile, outname, do_routing, matrixfile=None):
         """Generate the kicad project. Main entry point"""
 
         if not os.path.exists(outname):
             os.mkdir(outname)
 
         self.read_kle_json(infile)
-        self.generate_rows_and_columns(colgrouping)
+        self.assign_duplex_matrix()
         self.generate_schematic(outname)
         self.generate_layout(outname, do_routing)
         self.generate_project(outname)
+        if matrixfile:
+            self.generate_matrix_file(matrixfile)
 
     def read_kle_json(self, infile):
         """ Read the provided KLE input file and create a list of all the keyswitches that should
@@ -240,46 +222,68 @@ class KLEPCBGenerator:
                 if "author" in row:
                     self.keyboard.author = row["author"]
 
-    def generate_rows_and_columns(self, colgrouping):
-        """ Group keys in rows and columns based on the position of the center of the switch in a
-            grid """
+    def assign_duplex_matrix(self):
+        """ Assign each key a unique unordered pair (a, b), a<b, of bidirectional
+            matrix lines. M lines are chosen such that M(M-1)/2 >= number of keys,
+            so every key maps to its own (a,b) combination (duplex/square matrix).
+            The assignment is deterministic and independent of physical position.
+        """
 
-        print("Grouping keys in rows and columns ... ")
+        print("Assigning duplex matrix lines ... ")
 
-        # For each key in the board, determine the Y of the center of the key. This determines
-        # the row a key is in.
-        keys_in_row = [0] * MAX_ROWS
-        for index, key in enumerate(self.keyboard.keys):
-            centery = key.y_unit-0.5
-            row = math.floor(centery)
-            if row > MAX_ROWS-1:
-                exit("ERROR: Key placement produced too many rows. klepcbgen currently cannot generate a valid KiCad project for this keyboard layout.\nExiting ...")
+        num_keys = len(self.keyboard.keys)
+        m = min_lines_for_keys(num_keys)
+        self.keyboard.matrix_lines = m
 
-            self.keyboard.add_key_to_row(row, index)
-            self.keyboard.keys[index].row = row
+        # Iterate pairs in the order (0,1),(0,2),...,(0,M-1),(1,2),... so each
+        # key is simply the n-th pair in lexicographic order.
+        pair_gen = (
+            (a, b) for a in range(m) for b in range(a + 1, m)
+        )
+        for key_index, (a, b) in zip(range(num_keys), pair_gen):
+            key = self.keyboard.keys[key_index]
+            key.matrix_a = a
+            key.matrix_b = b
+            self.keyboard.matrix_pairs[key.num] = (a, b)
 
-            keys_in_row[row] += 1
+    def generate_matrix_file(self, outfile):
+        """ Write the duplex matrix wiring as a generic, self-describing JSON file
+            that firmware (QMK, ZMK, custom) can consume. Each key is mapped to its
+            (matrix_a, matrix_b) line pair.
+        """
 
-            if keys_in_row[row] > MAX_COLS:
-                exit("ERROR: Key placement produced too many columns. klepcbgen currently cannot generate a valid KiCad project for this keyboard layout.\nExiting ...")
+        print("Writing matrix wiring to '" + outfile + "' ...")
 
-        # Sort the keys in each row by X-coordinate, then assign a column to each key
-        for row in self.keyboard.rows.blocks:
-            row.sort(key=lambda key_index: self.keyboard.keys[key_index].x_unit)
+        rows = []
+        for key in self.keyboard.keys:
+            rows.append(
+                {
+                    "key": key.num,
+                    "legend": key.legend,
+                    "matrix_a": key.matrix_a,
+                    "matrix_b": key.matrix_b,
+                    "diode_net": "D" + str(key.num),
+                }
+            )
 
-            col = 0
-            for key_index in row:
-                key = self.keyboard.keys[key_index]
+        matrix = {
+            "name": self.keyboard.name,
+            "author": self.keyboard.author,
+            "matrix_type": "duplex",
+            "matrix_lines": self.keyboard.matrix_lines,
+            "max_keys": self.keyboard.matrix_lines
+            * (self.keyboard.matrix_lines - 1)
+            // 2,
+            "num_keys": len(rows),
+            "notes": "Duplex (square) matrix: each key connects matrix_a and "
+            "matrix_b via a diode (pad1->lineA, pad2->diode->lineB). "
+            "All lines are bidirectional GPIO.",
+            "keys": rows,
+        }
 
-                # Determine the column based on x-coordinate instead of sequentially
-                if colgrouping == 'pos':
-                    centerx = key.x_unit-0.5
-                    col = math.floor(centerx)
-
-                self.keyboard.add_key_to_col(col, key_index)
-                key.col = col
-                col += 1
-                
+        with open(outfile, "w", newline="\n", encoding="utf-8") as out_file:
+            json.dump(matrix, out_file, indent=2, ensure_ascii=False)
+            out_file.write("\n")
     def place_schematic_components(self):
         """Place schematic components determined by the layout(keyswitches and diodes)"""
         switch_tpl = self.jinja_env.get_template("schematic/keyswitch.tpl")
@@ -297,8 +301,8 @@ class KLEPCBGenerator:
                 legend=key.legend,
                 x=placement_x,
                 y=placement_y,
-                rowNum=key.row,
-                colNum=key.col,
+                matrix_a=key.matrix_a,
+                matrix_b=key.matrix_b,
                 keywidth=unit_width_to_available_footprint(key.width),
             )
             components_section = components_section + "\n"
@@ -341,30 +345,21 @@ class KLEPCBGenerator:
 
         # Load templates for netnames
         diodetpl = self.jinja_env.get_template("layout/diodenetname.tpl")
-        rowtpl = self.jinja_env.get_template("layout/rownetname.tpl")
-        coltpl = self.jinja_env.get_template("layout/colnetname.tpl")
+        matrixtpl = self.jinja_env.get_template("layout/matrixnetname.tpl")
         tracetpl = self.jinja_env.get_template("layout/trace.tpl")
 
         # Place keyswitches, diodes, vias and traces
         key_pitch = 19.05
-        key_origin_x = -100
-        key_origin_y = 17.78
+        # Origin is zeroed so the top-left key's switch center sits at PCB (0,0).
+        # The first key has x_unit/y_unit = 0.5 (its center), so shift by half a
+        # key pitch to bring that center exactly onto the origin.
+        key_origin_x = -0.5 * key_pitch
+        key_origin_y = -0.5 * key_pitch
 
-        # diode_offset = [-6.35, 8.89]
-        # col_via_offsets = [[0, -2.03], [0, 12.24]]
-        # row_via_offsets = [[-9.68, 9.83], [4.6, 9.83]]
-        # diode_trace_offsets = [[-6.38, 2.54], [-6.38, 7.77]]
-
-        # Several offsets that are relative to the 0,0 poin inside the switch layout template
+        # Several offsets that are relative to the 0,0 point inside the switch layout template
         diode_offset = [-5.8, 8.89]                         # Position of the diode 
         diode_trace_offsets = [[-5.8, 2.54], [-5.8, 7.77]]  # Start/end-points for the trace connecting the diode to the switch
-        row_trace_offset = [-5.8, 9.83]     # Position of the bottom pad of the diode
-        switch_contact_x_offset = 0.55      # Small offset for the vertical traces to avoid them getting too close to pads
-        switch_corner_y = 10                # Y-offset of the point where the downward trace can angle towards the next switch
-        switch_top = -4.50                  # Y-offset for the top of the Dwgs rectangle in the switch template
-        switch_bottom = 14.5                # Y-offset for the bottom of the Dwgs rectangle in the switch template
-        switch_left = -12                   # X-offset for the left of the Dwgs rectangle in the switch template
-        switch_right = 7                    # X-offset for the right of the Dwgs rectangle in the switch template
+        line_b_pad_offset = [-5.8, 9.83]                    # Position of the matrix_b pad of the diode
 
         for key in self.keyboard.keys:
             # Place switch
@@ -379,8 +374,8 @@ class KLEPCBGenerator:
                     y=ref_y,
                     diodenetnum=key.diodenetnum,
                     diodenetname=diodetpl.render(diodenum=key.num),
-                    colnetnum=key.colnetnum,
-                    colnetname=coltpl.render(colnum=key.col),
+                    matrix_a_netnum=key.matrix_a_netnum,
+                    matrix_a_netname=matrixtpl.render(line=key.matrix_a),
                     keywidth=unit_width_to_available_footprint(key.width),
                 )
                 + "\n"
@@ -396,8 +391,8 @@ class KLEPCBGenerator:
                     y=diode_y,
                     diodenetnum=key.diodenetnum,
                     diodenetname=diodetpl.render(diodenum=key.num),
-                    rownetnum=key.rownetnum,
-                    rownetname=rowtpl.render(rownum=key.row),
+                    matrix_b_netnum=key.matrix_b_netnum,
+                    matrix_b_netname=matrixtpl.render(line=key.matrix_b),
                 )
                 + "\n"
             )
@@ -419,102 +414,53 @@ class KLEPCBGenerator:
             component_count += 1
 
         if do_routing:
-            # Add traces between all diodes in a row
-            for row in self.keyboard.rows.blocks:
-                prev_index = -1
-                for key_index in row:
-                    if(prev_index != -1):                    
-                        left_key = self.keyboard.keys[prev_index]
-                        right_key = self.keyboard.keys[key_index]
+            # For each duplex matrix line, chain the contact points of all keys
+            # that use it. Each key contributes two contact points:
+            #   - its switch pad1 contact on line A (matrix_a)
+            #   - its diode matrix_b pad on line B (matrix_b)
+            # Chaining them keeps every key on a line electrically connected and
+            # eventually connected to the controller pin for that line.
+            for line in range(self.keyboard.matrix_lines):
+                # Collect contact points (x,y) and the netnum for this line
+                contacts = []
+                for key in self.keyboard.keys:
+                    ref_x = key_origin_x + key.x_unit * key_pitch
+                    ref_y = key_origin_y + key.y_unit * key_pitch
+                    if key.matrix_a == line:
+                        # switch pad1 contact (center of switch)
+                        contacts.append(
+                            (ref_x, ref_y, key.matrix_a_netnum)
+                        )
+                    if key.matrix_b == line:
+                        # diode matrix_b pad
+                        contacts.append(
+                            (
+                                ref_x + diode_offset[0],
+                                ref_y + diode_offset[1] + 0.94,
+                                key.matrix_b_netnum,
+                            )
+                        )
 
-                        left_diode_x = key_origin_x + left_key.x_unit * key_pitch + row_trace_offset[0]
-                        left_diode_y = key_origin_y + left_key.y_unit * key_pitch + row_trace_offset[1]
-
-                        right_diode_x = key_origin_x + right_key.x_unit * key_pitch + row_trace_offset[0]
-                        right_diode_y = key_origin_y + right_key.y_unit * key_pitch + row_trace_offset[1]
-
+                # Chain the contact points in sequence
+                prev = None
+                for contact in contacts:
+                    if prev is not None:
                         components_section = (
                             components_section
                             + tracetpl.render(
-                                x1=left_diode_x,
-                                y1=left_diode_y,
-                                x2=right_diode_x,
-                                y2=right_diode_y,
+                                x1=prev[0],
+                                y1=prev[1],
+                                x2=contact[0],
+                                y2=contact[1],
                                 layer="B.Cu",
-                                netnum=left_key.rownetnum,
+                                netnum=prev[2],
                             )
                             + "\n"
                         )
-                    prev_index = key_index
-
-            # Add (partial) traces between switches columns
-            for column in self.keyboard.columns.blocks:
-                prev_index = -1
-                for key_index in column:
-                    if(prev_index != -1):                    
-                        top_key = self.keyboard.keys[prev_index]
-                        bot_key = self.keyboard.keys[key_index]
-
-                        top_hole_x = key_origin_x + top_key.x_unit * key_pitch
-                        top_hole_y = key_origin_y + top_key.y_unit * key_pitch
-
-                        bot_hole_x = key_origin_x + bot_key.x_unit * key_pitch
-                        bot_hole_y = key_origin_y + bot_key.y_unit * key_pitch
-
-                        components_section = (
-                            components_section
-                            + tracetpl.render(
-                                x1=top_hole_x + switch_contact_x_offset,
-                                y1=top_hole_y,
-                                x2=top_hole_x + switch_contact_x_offset,
-                                y2=top_hole_y + switch_corner_y,
-                                layer="F.Cu",
-                                netnum=top_key.colnetnum,
-                            )
-                            + "\n"
-                        )
-
-                        to_x = top_hole_x + switch_contact_x_offset
-                        if to_x > bot_hole_x + switch_right:
-                            to_x = bot_hole_x + switch_right
-                        elif to_x < bot_hole_x + switch_left:
-                            to_x = bot_hole_x + switch_left
-
-                        components_section = (
-                            components_section
-                            + tracetpl.render(
-                                x1=bot_hole_x + switch_contact_x_offset,
-                                y1=bot_hole_y,
-                                x2=to_x,
-                                y2=bot_hole_y + switch_top,
-                                layer="F.Cu",
-                                netnum=top_key.colnetnum,
-                            )
-                            + "\n"
-                        )
-
-                        if to_x > top_hole_x + switch_right:
-                            to_x = top_hole_x + switch_right
-                        elif to_x < top_hole_x + switch_left:
-                            to_x = top_hole_x + switch_left
-
-                        components_section = (
-                            components_section
-                            + tracetpl.render(
-                                x1=top_hole_x + switch_contact_x_offset,
-                                y1=top_hole_y + switch_corner_y,
-                                x2=to_x,
-                                y2=top_hole_y + switch_bottom,
-                                layer="F.Cu",
-                                netnum=top_key.colnetnum,
-                            )
-                            + "\n"
-                        )
-
-                    prev_index = key_index
-
+                    prev = contact
 
         return components_section, component_count
+
 
     def define_nets(self):
         """Define all the nets for this layout"""
@@ -533,15 +479,11 @@ class KLEPCBGenerator:
         self.nets.add_net('"Net-(U1-Pad42)"')
         self.nets.add_net('/Reset')
 
-        row_tpl = self.jinja_env.get_template("layout/rownetname.tpl")
-        # Always declare the max number of row nets, since the control circuit template refers to them
-        for row_num in range(MAX_ROWS):
-            self.nets.add_net(row_tpl.render(rownum=row_num))
-
-        col_tpl = self.jinja_env.get_template("layout/colnetname.tpl")
-        # Always declare the max number of column nets, since the control circuit template refers to them
-        for col_num in range(MAX_COLS): 
-            self.nets.add_net(col_tpl.render(colnum=col_num))
+        matrix_tpl = self.jinja_env.get_template("layout/matrixnetname.tpl")
+        # Declare one net per duplex matrix line, since the control circuit
+        # template refers to them
+        for line in range(self.keyboard.matrix_lines):
+            self.nets.add_net(matrix_tpl.render(line=line))
 
         diode_tpl = self.jinja_env.get_template("layout/diodenetname.tpl")
         for diode_num in range(len(self.keyboard.keys)):
@@ -560,22 +502,15 @@ class KLEPCBGenerator:
             )
             addnets = addnets + "    (add_net " + netname + ")\n"
 
-        # make each key in the board aware in which row/column/diode net it resides
-        rowtpl = self.jinja_env.get_template("layout/rownetname.tpl")
-        for index, row in enumerate(self.keyboard.rows.blocks):
-            rownetname = rowtpl.render(rownum=index)
-            for keyindex in row:
-                self.keyboard.keys[keyindex].rownetnum = self.nets.get_net_num(
-                    rownetname
-                )
-
-        coltpl = self.jinja_env.get_template("layout/colnetname.tpl")
-        for index, col in enumerate(self.keyboard.columns.blocks):
-            colnetname = coltpl.render(colnum=index)
-            for keyindex in col:
-                self.keyboard.keys[keyindex].colnetnum = self.nets.get_net_num(
-                    colnetname
-                )
+        # make each key in the board aware in which matrix line and diode net it resides
+        matrixtpl = self.jinja_env.get_template("layout/matrixnetname.tpl")
+        for key in self.keyboard.keys:
+            key.matrix_a_netnum = self.nets.get_net_num(
+                matrixtpl.render(line=key.matrix_a)
+            )
+            key.matrix_b_netnum = self.nets.get_net_num(
+                matrixtpl.render(line=key.matrix_b)
+            )
 
         diodetpl = self.jinja_env.get_template("layout/diodenetname.tpl")
         for diodenum in range(len(self.keyboard.keys)):

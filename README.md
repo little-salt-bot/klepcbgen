@@ -13,7 +13,9 @@ Current klepcbgen features are:
 * Keys of different widths and/or heights
 * Add stabilizers to keys 2 units or more wide
 * Cherry MX switch mount
-* Limitation: layouts with at most 18 columns and 7 rows
+* **Duplex (square) matrix wiring** — each key is assigned a unique pair of bidirectional matrix lines, so `M` GPIO lines address up to `M(M-1)/2` keys. This maximizes keys-per-GPIO on the controller (e.g. 14 lines address up to 91 keys) and removes the fixed row/column limits of a classic matrix.
+* **Matrix wiring file** — generates a generic JSON file mapping each key to its `(matrix_a, matrix_b)` duplex line pair, ready for firmware (QMK, ZMK, or custom).
+* **Top-left key at origin** — the top-left switch center sits at PCB (0,0).
 
 Currently **not** supported are:
 
@@ -38,6 +40,14 @@ Then install the required dependencies, using the following command:
 
 Please read [this wiki page](../../wiki/Usage) for usage instructions.
 
+Basic invocation:
+
+`python3 klepcbgen.py -o <outname> [options] <input.kle.json>`
+
+* `-o <outname>` — directory and base name for output files (e.g. `-o id80` produces `id80/id80.sch`, `id80/id80.kicad_pcb`, `id80/id80.pro`)
+* `-m <matrixfile>` — additionally write a generic JSON file mapping each key to its `(matrix_a, matrix_b)` duplex matrix pair (for firmware). Example: `-m matrix.json`
+* `-n` — do not add traces connecting matrix lines
+
 ## Kicad 6
 
 Additional instructions regarding Kicad 6 can be found [here](../../wiki/KiCad-6).
@@ -46,7 +56,6 @@ Additional instructions regarding Kicad 6 can be found [here](../../wiki/KiCad-6
 
 Core features:
 
-* Smarter options for rows/columns grouping, as the current approach does not allow for a full 104-key layout
 * Support foorprints with stabilizers for vertical keys (numpad enter and 0)
 * Add the option to use Alps footprints (Supported in KiCad as Matias switches)
 * Support ISO-ENTER

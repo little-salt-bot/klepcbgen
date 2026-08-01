@@ -21,6 +21,6 @@ F 3 "" H {{x}} {{y+150}} 60  0000 C CNN
 	0    -1   -1   0   
 $EndComp
 Text Label {{x+400}}  {{y+300}} 0    50   ~ 0
-Row_{{rowNum}}
+Matrix_{{matrix_b}}
 Text Label {{x}}  {{y}} 2    50   ~ 0
-Col_{{colNum}}
+Matrix_{{matrix_a}}
