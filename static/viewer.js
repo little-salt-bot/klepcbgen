@@ -28,9 +28,14 @@ function initViewer(canvas) {
 
   const hemi = new THREE.HemisphereLight(0xffffff, 0x334155, 0.9);
   scene.add(hemi);
+  // Key light from above (top of board).
   const key = new THREE.DirectionalLight(0xffffff, 1.2);
   key.position.set(80, 120, 100);
   scene.add(key);
+  // Second key light from below so the underside of the PCB is lit too.
+  const keyBottom = new THREE.DirectionalLight(0xffffff, 0.7);
+  keyBottom.position.set(-60, -120, -80);
+  scene.add(keyBottom);
   const rim = new THREE.DirectionalLight(0x8ab4ff, 0.5);
   rim.position.set(-80, 40, -60);
   scene.add(rim);
