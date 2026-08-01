@@ -17,7 +17,9 @@ function initViewer(canvas) {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x171a21);
 
-  camera = new THREE.PerspectiveCamera(50, 1, 1, 100000);
+  // GLB from kicad-cli uses meters (board ~0.3m wide), so the near plane must
+  // be far smaller than the default to avoid clipping the small model.
+  camera = new THREE.PerspectiveCamera(50, 1, 0.001, 1000);
   camera.position.set(60, 45, 80);
 
   controls = new OrbitControls(camera, canvas);
