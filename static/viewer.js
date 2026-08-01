@@ -33,7 +33,7 @@ function initViewer(canvas) {
   key.position.set(80, 120, 100);
   scene.add(key);
   // Second key light from below so the underside of the PCB is lit too.
-  const keyBottom = new THREE.DirectionalLight(0xffffff, 0.7);
+  const keyBottom = new THREE.DirectionalLight(0xffffff, 1.2);
   keyBottom.position.set(-60, -120, -80);
   scene.add(keyBottom);
   const rim = new THREE.DirectionalLight(0x8ab4ff, 0.5);
