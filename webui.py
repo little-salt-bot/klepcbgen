@@ -9,11 +9,14 @@ or:
 import io
 import json
 import os
+import shutil
+import subprocess
 import tempfile
 import zipfile
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, Response
+from fastapi.staticfiles import StaticFiles
 
 from klepcbgenmod import (
     KLEPCBGenerator,
@@ -26,6 +29,16 @@ from klepcbgenmod import (
 from render import render_pcb_svg
 
 app = FastAPI(title="klepcbgen Web UI")
+
+# Serve bundled three.js + GLB viewer assets (self-contained, no CDN needed).
+_STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+if os.path.isdir(_STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+    # GLTFLoader.module.js has a relative `../utils/BufferGeometryUtils.js`
+    # import that resolves to /utils/ (not /static/utils/). Serve it there.
+    _UTILS_DIR = os.path.join(_STATIC_DIR, "utils")
+    if os.path.isdir(_UTILS_DIR):
+        app.mount("/utils", StaticFiles(directory=_UTILS_DIR), name="utils")
 
 # Self-contained example layout (JB82, 82-key 75%-ish) so users can try it
 # without hunting for a KLE JSON.
@@ -166,12 +179,14 @@ def _index_html() -> str:
   }}
   .ghost:hover {{ color: var(--text); border-color: #3d4553; }}
   #preview {{
-    min-height: 360px; display: grid; place-items: center;
+    min-height: 420px; height: 480px; position: relative;
+    display: grid; place-items: center;
     background: var(--panel); border: 1px solid var(--border);
-    border-radius: var(--radius); padding: 16px;
+    border-radius: var(--radius); padding: 8px; overflow: hidden;
   }}
   #preview img {{ max-width: 100%; max-height: 560px; }}
-  #preview .placeholder {{ color: var(--muted); text-align: center; }}
+  #pcb3d {{ width: 100%; height: 100%; display: block; }}
+  #preview .placeholder {{ color: var(--muted); text-align: center; position: absolute; inset: 0; display: grid; place-items: center; }}
   #preview .placeholder svg {{ margin-bottom: 8px; opacity: .5; }}
   #status {{
     margin-top: 14px; font-size: 13px; line-height: 1.6;
@@ -277,12 +292,13 @@ def _index_html() -> str:
     <div class="card">
       <h2>Preview</h2>
       <div id="preview">
+        <canvas id="pcb3d" style="width:100%;height:100%;display:none"></canvas>
         <div class="placeholder" id="placeholder">
           <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <rect x="3" y="5" width="18" height="14" rx="2"/>
             <path d="M3 9h18M7 5v14M17 5v14"/>
           </svg><br>
-          Generate a board to see a live PCB preview here.
+          Generate a board to see a live 3D PCB preview here.
         </div>
       </div>
       <div class="meta">
@@ -297,6 +313,15 @@ def _index_html() -> str:
   matrix JSON, and firmware from a KLE layout. No files leave your network.
 </footer>
 
+<script type="importmap">
+{{
+  "imports": {{
+    "three": "/static/three.module.js",
+    "three/addons/": "/static/"
+  }}
+}}
+</script>
+<script type="module" src="/static/viewer.js"></script>
 <script>
   const example = {example};
 
@@ -315,9 +340,15 @@ def _index_html() -> str:
   async function generate() {{
     const btn = document.getElementById('genbtn');
     const preview = document.getElementById('preview');
+    const canvas = document.getElementById('pcb3d');
+    const placeholder = document.getElementById('placeholder');
     btn.disabled = true;
     setStatus('<span class="spinner"></span>Generating board…', 'loading');
-    preview.innerHTML = '<span class="spinner"></span>';
+    // Keep the canvas + placeholder elements alive (show3D needs them later).
+    // Show a spinner overlay without clobbering the DOM.
+    placeholder.style.display = 'grid';
+    placeholder.innerHTML = '<span class="spinner"></span>';
+    canvas.style.display = 'none';
 
     const body = {{
       kle: document.getElementById('kle').value,
@@ -341,7 +372,8 @@ def _index_html() -> str:
       if (!r.ok) {{
         const detail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail || 'Unknown error');
         setStatus('', '');
-        preview.innerHTML = '<div class="errorbox">' + esc(detail) + '</div>';
+        placeholder.innerHTML = '<div class="errorbox">' + esc(detail) + '</div>';
+        placeholder.style.display = 'grid';
         return;
       }}
       setStatus(
@@ -349,10 +381,17 @@ def _index_html() -> str:
         data.matrix_lines + ' matrix lines. &nbsp;<a href="' + data.download + '">Download ZIP</a>',
         'ok'
       );
-      preview.innerHTML = '<img src="' + data.thumbnail + '" alt="PCB preview" onerror="this.outerHTML=' + "'" + '<div class=errorbox>Preview unavailable</div>' + "'" + '">';
+      if (data.viewer3d) {{
+        window.show3D(data.viewer3d);
+      }} else {{
+        // fallback: flat SVG thumbnail if 3D export unavailable
+        placeholder.style.display = 'grid';
+        placeholder.innerHTML = '<img src="' + data.thumbnail + '" alt="PCB preview">';
+      }}
     }} catch (e) {{
       setStatus('', '');
-      preview.innerHTML = '<div class="errorbox">Network error: ' + esc(String(e)) + '</div>';
+      placeholder.innerHTML = '<div class="errorbox">Network error: ' + esc(String(e)) + '</div>';
+      placeholder.style.display = 'grid';
     }} finally {{
       btn.disabled = false;
     }}
@@ -427,6 +466,12 @@ async def generate(payload: dict):
     with open(thumb_path, "w") as f:
         f.write(svg)
 
+    # 3D viewer: export a binary glTF of the PCB solid model (board + copper +
+    # solder mask + holes) via KiCad, for the embedded three.js viewer.
+    glb_name = "board.glb"
+    glb_path = os.path.join(workdir, glb_name)
+    glb_ok = _export_glb(pcb_path, glb_path)
+
     zipbuf = io.BytesIO()
     with zipfile.ZipFile(zipbuf, "w", zipfile.ZIP_DEFLATED) as zf:
         for root, _dirs, files in os.walk(outname):
@@ -446,6 +491,7 @@ async def generate(payload: dict):
         "matrix_lines": kb.matrix_lines,
         "download": f"/download?d={workdir}",
         "thumbnail": f"/thumb?d={workdir}",
+        "viewer3d": f"/glb?d={workdir}" if glb_ok else None,
         "zip_bytes": len(zip_data),
     }
 
@@ -478,6 +524,39 @@ async def thumb(d: str):
         raise HTTPException(404, "preview not found")
     with open(svg_path) as f:
         return Response(f.read(), media_type="image/svg+xml")
+
+
+@app.get("/glb")
+async def glb(d: str):
+    glb_path = os.path.join(d, "board.glb")
+    if not os.path.exists(glb_path):
+        raise HTTPException(404, "3D board model not found")
+    with open(glb_path, "rb") as f:
+        return Response(
+            f.read(),
+            media_type="model/gltf-binary",
+            headers={"Content-Disposition": "inline; filename=board.glb"},
+        )
+
+
+def _export_glb(pcb_path, out_path):
+    """Export a binary glTF (GLB) of the PCB solid model using kicad-cli.
+
+    Returns True on success (file written), False if kicad-cli is unavailable.
+    The board solid model (outline, copper, solder mask, holes) exports even
+    without footprint 3D models, giving a true interactive 3D view.
+    """
+    kicad_cli = shutil.which("kicad-cli")
+    if not kicad_cli:
+        return False
+    try:
+        proc = subprocess.run(
+            [kicad_cli, "pcb", "export", "glb", pcb_path, "-o", out_path],
+            capture_output=True, text=True, timeout=60,
+        )
+        return os.path.exists(out_path) and os.path.getsize(out_path) > 0
+    except (subprocess.SubprocessError, OSError):
+        return False
 
 
 if __name__ == "__main__":

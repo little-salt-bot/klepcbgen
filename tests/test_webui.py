@@ -102,6 +102,41 @@ class TestWebUI(unittest.TestCase):
         self.assertTrue(any(n.endswith(".kicad_pcb") for n in names))
         self.assertIn("matrix.json", names)
 
+    def test_generate_produces_3d_viewer(self):
+        # When kicad-cli is available, the generate response must include a
+        # viewer3d URL and the /glb endpoint must serve a real GLB.
+        from webui import _export_glb, _STATIC_DIR  # noqa
+        payload = {
+            "kle": _kle_str(),
+            "controller": "rp2040",
+            "key_footprint": "cherry_mx",
+            "diode_footprint": "0805",
+            "key_pitch": 19.05,
+            "edge_margin": 5.0,
+            "do_routing": True,
+            "edge_cuts": True,
+            "firmware_type": "both",
+        }
+        data = self.client.post("/generate", json=payload).json()
+        self.assertIn("viewer3d", data)
+        if data["viewer3d"] is not None:
+            d = data["download"].split("d=")[1]
+            gr = self.client.get(f"/glb?d={d}")
+            self.assertEqual(gr.status_code, 200)
+            self.assertEqual(gr.headers["content-type"], "model/gltf-binary")
+            self.assertGreater(len(gr.content), 100)
+            # glTF magic header
+            self.assertEqual(gr.content[:4], b"glTF")
+
+    def test_static_assets_served(self):
+        # three.js viewer assets must be reachable (self-contained UI).
+        for path in ["three.module.js", "GLTFLoader.module.js",
+                     "OrbitControls.module.js", "viewer.js",
+                     "utils/BufferGeometryUtils.js"]:
+            r = self.client.get(f"/static/{path}")
+            self.assertEqual(r.status_code, 200, path)
+            self.assertGreater(len(r.content), 0, path)
+
 
 if __name__ == "__main__":
     unittest.main()
