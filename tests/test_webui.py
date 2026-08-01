@@ -68,7 +68,7 @@ class TestWebUI(unittest.TestCase):
     def test_generate_invalid_json(self):
         r = self.client.post("/generate", json={"kle": "this is not json"})
         self.assertEqual(r.status_code, 400)
-        self.assertIn("Invalid KLE JSON", r.json()["detail"])
+        self.assertIn("Could not parse KLE", r.json()["detail"])
 
     def test_download_and_thumb(self):
         payload = {

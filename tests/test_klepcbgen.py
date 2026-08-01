@@ -11,7 +11,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(__file__))
 
 from klepcbgenmod import (
-    KLEPCBGenerator, GeneratorOptions,
+    KLEPCBGenerator, GeneratorOptions, parse_kle_json,
     min_lines_for_keys, CONTROLLER_PINS,
 )
 
@@ -22,6 +22,43 @@ EXAMPLE = os.path.join(ROOT, "example_layout.json")
 def _kle():
     with open(EXAMPLE) as f:
         return json.load(f)
+
+
+class TestParseKleJson(unittest.TestCase):
+    """parse_kle_json must tolerate KLE raw-data quirks: JS-style unquoted keys,
+    single-quoted strings, and the outer [ ] wrapper often being omitted."""
+
+    def test_strict_json(self):
+        self.assertEqual(parse_kle_json('[["A","B"]]'), [["A", "B"]])
+
+    def test_unquoted_keys_json5(self):
+        # {x:0.25} and {h:2} have unquoted keys -- invalid strict JSON
+        data = parse_kle_json('[["7","8",{h:2},"+"]]')
+        self.assertEqual(data[0][2], {"h": 2})
+
+    def test_missing_outer_brackets(self):
+        # KLE raw data often omits the top-level [ ]
+        data = parse_kle_json('["A","B"],\n["C","D"]')
+        self.assertEqual(data, [["A", "B"], ["C", "D"]])
+
+    def test_single_quoted_strings(self):
+        data = parse_kle_json("['Num Lock','/']")
+        self.assertEqual(data, ["Num Lock", "/"])
+
+    def test_realistic_kle_paste(self):
+        # The exact style of KLE raw-data paste that previously failed: JS keys,
+        # missing outer wrapper, HTML block string.
+        kle = """["Num Lock","/","*","-",{x:0.25,f:4,w:14,h:5,d:true},"<h5><b>Getting Started</b></h5>"],
+[{f:3},"7\\nHome","8\\n\\u2191",{h:2},"+"],
+["4\\n\\u2190","5","6\\n\\u2192"]"""
+        data = parse_kle_json(kle)
+        self.assertEqual(len(data), 3)
+        self.assertEqual(data[0][4], {"x": 0.25, "f": 4, "w": 14, "h": 5, "d": True})
+        self.assertEqual(data[1][3], {"h": 2})
+
+    def test_invalid_raises(self):
+        with self.assertRaises(ValueError):
+            parse_kle_json("this is not a layout at all")
 
 
 class TestMinLines(unittest.TestCase):

@@ -9,6 +9,36 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
+try:
+    import json5
+except ImportError:
+    json5 = None
+
+
+def parse_kle_json(text):
+    """Parse KLE raw-data text into a list of key rows.
+
+    KLE's 'raw data' export is JavaScript-ish rather than strict JSON: keys may
+    be unquoted ({x:0.25}, {h:2}), strings may use single quotes, and the outer
+    [ ] array wrapper is often omitted. Try strict JSON first, then a lenient
+    json5 parse (auto-wrapping the top-level array). Raises ValueError if the
+    text can't be parsed at all.
+    """
+    candidates = [text, "[" + text + "]"]
+    for c in candidates:
+        try:
+            return json.loads(c)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    if json5 is not None:
+        for c in candidates:
+            try:
+                return json5.loads(c)
+            except ValueError:
+                pass
+    raise ValueError("Could not parse KLE layout data (expected KLE JSON/raw data).")
+
+
 # Program version
 PROGRAM_VERSION = "0.3"
 
@@ -248,10 +278,10 @@ class KLEPCBGenerator:
         print("Reading input file '" + infile + "' ...")
 
         if infile == "-":
-            kle_json = json.load(sys.stdin)
+            kle_json = parse_kle_json(sys.stdin.read())
         else:
             with open(infile, "r", encoding="utf-8") as read_file:
-                kle_json = json.load(read_file)
+                kle_json = parse_kle_json(read_file.read())
 
         # First create a list of switches, each with its own X,Y coordinate
         current_x = 0.0

@@ -18,6 +18,7 @@ from fastapi.responses import HTMLResponse, Response
 from klepcbgenmod import (
     KLEPCBGenerator,
     GeneratorOptions,
+    parse_kle_json,
     CONTROLLERS,
     KEY_FOOTPRINTS,
     DIODE_FOOTPRINTS,
@@ -220,7 +221,7 @@ def _index_html() -> str:
         <button type="button" class="ghost" onclick="loadExample()">Load example layout</button>
       </div>
       <label for="kle">Keyboard Layout Editor (KLE) JSON</label>
-      <textarea id="kle" spellcheck="false" placeholder='Paste raw KLE JSON here, e.g. [{{"name":"My Board"}}, ...]'></textarea>
+      <textarea id="kle" spellcheck="false" placeholder='Paste KLE raw data here (outer brackets optional). e.g. [{{"name":"My Board"}}, ["A","B"]]'></textarea>
 
       <div class="row">
         <div>
@@ -376,9 +377,9 @@ async def generate(payload: dict):
     if not kle:
         raise HTTPException(400, "No KLE JSON provided")
     try:
-        kle_data = json.loads(kle)
-    except json.JSONDecodeError as e:
-        raise HTTPException(400, f"Invalid KLE JSON: {e}")
+        kle_data = parse_kle_json(kle)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
     options = GeneratorOptions(
         key_pitch=float(payload.get("key_pitch", 19.05)),

@@ -1,3 +1,4 @@
 Jinja2
 fastapi
 uvicorn
+json5
