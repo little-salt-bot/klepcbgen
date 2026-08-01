@@ -540,19 +540,29 @@ async def glb(d: str):
 
 
 def _export_glb(pcb_path, out_path):
-    """Export a binary glTF (GLB) of the PCB solid model using kicad-cli.
+    """Export a binary glTF (GLB) of the full PCB using kicad-cli.
+
+    Includes the board solid model, copper (tracks/pads/zones), silkscreen,
+    soldermask, and footprint 3D models so the viewer shows the complete PCB
+    (not just the bare FR4 board).
 
     Returns True on success (file written), False if kicad-cli is unavailable.
-    The board solid model (outline, copper, solder mask, holes) exports even
-    without footprint 3D models, giving a true interactive 3D view.
     """
     kicad_cli = shutil.which("kicad-cli")
     if not kicad_cli:
         return False
     try:
+        env = dict(os.environ)
+        # Point KiCad at the standard 3D model library so component models load.
+        env.setdefault("KISYS3DMOD", "/usr/share/kicad/3dmodels")
         proc = subprocess.run(
-            [kicad_cli, "pcb", "export", "glb", pcb_path, "-o", out_path],
-            capture_output=True, text=True, timeout=60,
+            [
+                kicad_cli, "pcb", "export", "glb", pcb_path, "-o", out_path,
+                "--include-tracks", "--include-pads", "--include-zones",
+                "--include-inner-copper", "--include-silkscreen",
+                "--include-soldermask",
+            ],
+            capture_output=True, text=True, timeout=120, env=env,
         )
         return os.path.exists(out_path) and os.path.getsize(out_path) > 0
     except (subprocess.SubprocessError, OSError):

@@ -17,10 +17,13 @@ function initViewer(canvas) {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x171a21);
 
-  // GLB from kicad-cli uses meters (board ~0.3m wide), so the near plane must
-  // be far smaller than the default to avoid clipping the small model.
-  camera = new THREE.PerspectiveCamera(50, 1, 0.001, 1000);
-  camera.position.set(60, 45, 80);
+  // Orthographic projection keeps all parallel edges parallel when orbiting,
+  // so the board doesn't warp/distort as it rotates.
+  const frustum = 2.0;
+  camera = new THREE.OrthographicCamera(
+    -frustum, frustum, frustum, -frustum, 0.001, 1000
+  );
+  camera.position.set(1.0, 0.75, 1.2);
 
   controls = new OrbitControls(camera, canvas);
   controls.enableDamping = true;
@@ -54,10 +57,21 @@ function fitCamera(obj) {
   const size = box.getSize(new THREE.Vector3());
   const center = box.getCenter(new THREE.Vector3());
   const maxDim = Math.max(size.x, size.y, size.z) || 1;
-  const fov = camera.fov * Math.PI / 180;
-  const dist = (maxDim / 2) / Math.tan(fov / 2);
-  camera.position.copy(center).add(new THREE.Vector3(dist * 1.2, dist * 0.9, dist * 1.2));
+
+  // Position the camera along a fixed diagonal so the board fills the frame.
+  const dir = new THREE.Vector3(1, 0.75, 1.2).normalize();
+  const dist = maxDim * 2.2;
+  camera.position.copy(center).add(dir.multiplyScalar(dist));
   controls.target.copy(center);
+
+  // For an ortho camera, set the frustum half-size to frame the model (this is
+  // how ortho "zoom" works — the frustum width controls how much is visible).
+  const viewHalf = maxDim * 1.6;
+  camera.left = -viewHalf;
+  camera.right = viewHalf;
+  camera.top = viewHalf;
+  camera.bottom = -viewHalf;
+  camera.updateProjectionMatrix();
   controls.update();
 }
 

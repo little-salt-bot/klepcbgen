@@ -480,7 +480,7 @@
       (net {{nets.get_net_num("GND")}} GND))
     (pad 6 smd rect (at -4.4 -2.9) (size 2 2.5) (layers B.Cu B.Paste B.Mask)
       (net {{nets.get_net_num("GND")}} GND))
-    (model ${KISYS3DMOD}/Connector_USB.3dshapes/USB_Mini-B_Wuerth_65100516121_Horizontal.wrl
+    (model ${KISYS3DMOD}/Connector_USB.3dshapes/USB_Mini-B_Lumberg_2486_01_Horizontal.wrl
       (at (xyz 0 0 0))
       (scale (xyz 1 1 1))
       (rotate (xyz 0 0 0))
