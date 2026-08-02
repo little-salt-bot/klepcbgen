@@ -123,6 +123,23 @@ class GeneratorOptions:
     matrixfile: str = None             # path to emit matrix wiring JSON
     firmware_type: str = "both"        # none|qmk|zmk|both
 
+    # --- plate generation (kb-plategen port) ---
+    plate_enabled: bool = True         # generate a switch plate + drive edge cuts
+    plate_cutout: str = "MX"           # switch cutout type (plategen.CUTOUT_SIZE key)
+    plate_cutout_radius: float = 0.5   # switch cutout corner fillet (mm)
+    plate_cutout_width: float = 14.0   # for Custom Rectangle
+    plate_cutout_height: float = 14.0
+    plate_stab_type: str = "Large"     # stabilizer cutout style
+    plate_stab_radius: float = 0.5
+    plate_stab_width: float = 7.0
+    plate_stab_height: float = 15.0
+    plate_stab_offset: float = -0.5
+    plate_h_spacing: float = 19.05     # key center spacing X (mm)
+    plate_v_spacing: float = 19.05     # key center spacing Y (mm)
+    plate_kerf: float = 0.0            # laser kerf compensation (mm)
+    plate_combine: bool = False        # merge overlapping cutouts
+    plate_margin: float = 5.0          # plate border margin around cutouts (mm)
+
     def validate(self):
         if self.key_pitch <= 0:
             raise ValueError("key_pitch must be > 0")
@@ -270,6 +287,7 @@ class KLEPCBGenerator:
         self.keyboard = Keyboard()
         self.options = options or GeneratorOptions()
         self.options.validate()
+        self._plate = None
         self.project_dir = Path(__file__).resolve().parent
         self.jinja_env = Environment(
             loader=FileSystemLoader([self.project_dir / "templates"]),
@@ -293,6 +311,9 @@ class KLEPCBGenerator:
 
         self.read_kle_json(infile)
         self.assign_duplex_matrix()
+        # Generate the plate FIRST — it's the stable reference and its outer
+        # border drives the PCB Edge.Cuts outline.
+        self.generate_plate()
         self.generate_schematic(outname)
         self.generate_layout(outname)
         self.generate_project(outname)
@@ -824,6 +845,45 @@ class KLEPCBGenerator:
             return self.resolve_controller_anchor()
         return self._controller_anchor
 
+    def generate_plate(self):
+        """Generate the switch plate (kb-plategen geometry) and cache it.
+
+        Returns the plategen.Plate instance (or None if plate generation is
+        disabled). The plate's outer border is what drives the PCB Edge.Cuts
+        outline, so the plate and board edges always agree. The plate file is
+        the MORE STABLE reference than the individual footprints."""
+        from plategen import Plate, PlateConfig
+        opts = self.options
+        if not opts.plate_enabled:
+            return None
+        cfg = PlateConfig()
+        cfg.cutout_type = opts.plate_cutout
+        cfg.cutout_radius = opts.plate_cutout_radius
+        cfg.cutout_width = opts.plate_cutout_width
+        cfg.cutout_height = opts.plate_cutout_height
+        cfg.stab_type = opts.plate_stab_type
+        cfg.stab_radius = opts.plate_stab_radius
+        cfg.stab_width = opts.plate_stab_width
+        cfg.stab_height = opts.plate_stab_height
+        cfg.stab_offset = opts.plate_stab_offset
+        cfg.h_spacing = opts.plate_h_spacing or opts.key_pitch
+        cfg.v_spacing = opts.plate_v_spacing or opts.key_pitch
+        cfg.kerf = opts.plate_kerf
+        cfg.combine_overlaps = opts.plate_combine
+        cfg.margin = opts.plate_margin
+
+        plate = Plate(cfg)
+        pitch = opts.key_pitch
+        origin = -0.5 * pitch  # top-left switch center at (0,0)
+        for key in self.keyboard.keys:
+            cx = origin + key.x_unit * pitch
+            cy = origin + key.y_unit * pitch
+            plate.add_key(cx, cy, key.width, key.height,
+                          rotation=getattr(key, "rot", 0))
+        plate.finalize_border()
+        self._plate = plate
+        return plate
+
     def compute_edge_cuts(self):
         """Compute the board outline (Edge.Cuts) based on the bounding box of
            all keyswitch footprints plus a configurable margin, with optional
@@ -847,7 +907,19 @@ class KLEPCBGenerator:
         margin = self.options.edge_margin
         radius = self.options.edge_radius
 
-        min_x, min_y, max_x, max_y = self._switch_bbox()
+        # The plate (generated FIRST) is the stable reference for the board
+        # outline. When plate generation is enabled, use the plate's outer
+        # border as the switch-region boundary — it already includes the
+        # cutout half-size + plate_margin, so don't add edge_margin again on
+        # top of it. Otherwise fall back to the switch bbox + edge_margin.
+        plate = getattr(self, "_plate", None)
+        if plate is not None and plate.border is not None:
+            min_x, min_y = plate.min_x, plate.min_y
+            max_x, max_y = plate.max_x, plate.max_y
+            # The board outline adds its own margin around the plate.
+            margin = 0.0
+        else:
+            min_x, min_y, max_x, max_y = self._switch_bbox()
 
         # Include the controller + support block in the outline so it always
         # lands on the board, regardless of layout size. Uses the collision-free

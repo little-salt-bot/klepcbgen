@@ -207,6 +207,11 @@ def _index_html() -> str:
   #status.loading {{ display: block; background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); }}
   #status a {{ color: inherit; font-weight: 700; }}
   .meta {{ display: flex; flex-wrap: wrap; gap: 16px; margin-top: 8px; font-size: 13px; }}
+  .subhead {{
+    margin: 18px 0 8px; font-size: 14px; font-weight: 700;
+    color: var(--text); letter-spacing: .02em;
+  }}
+  .subhead:first-of-type {{ margin-top: 4px; }}
   .meta span {{ display: flex; align-items: center; gap: 6px; color: var(--muted); }}
   .dot {{ width: 8px; height: 8px; border-radius: 50%; display: inline-block; }}
   .dot.green {{ background: var(--ok); }}
@@ -293,6 +298,51 @@ def _index_html() -> str:
       <label class="check"><input id="routing" type="checkbox" checked> Auto-route traces</label>
       <label class="check"><input id="edgecuts" type="checkbox" checked> Board outline (Edge.Cuts)</label>
 
+      <h3 class="subhead">Switch plate</h3>
+      <label class="check"><input id="plate_enabled" type="checkbox" checked> Generate plate file (drives edge cuts)</label>
+      <div class="row">
+        <div>
+          <label for="plate_cutout">Switch cutout</label>
+          <select id="plate_cutout">
+            <option value="MX">MX</option>
+            <option value="Alps">Alps</option>
+            <option value="MX/Alps">MX/Alps</option>
+            <option value="Support Plate">Support Plate</option>
+            <option value="Custom Rectangle">Custom Rectangle</option>
+            <option value="Choc V2">Choc V2</option>
+          </select>
+        </div>
+        <div>
+          <label for="plate_cutout_radius">Cutout radius (mm)</label>
+          <input id="plate_cutout_radius" type="number" step="0.1" value="0.5">
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label for="plate_stab_type">Stabilizer</label>
+          <select id="plate_stab_type">
+            <option value="Large">Large</option>
+            <option value="Normal">Normal</option>
+            <option value="3mm Plate">3mm Plate</option>
+            <option value="3mm Plate for Screw-ins">3mm Plate for Screw-ins</option>
+            <option value="5mm Plate">5mm Plate</option>
+            <option value="Choc V1">Choc V1</option>
+            <option value="Choc V2">Choc V2</option>
+            <option value="Gateron LP">Gateron LP</option>
+            <option value="Custom Rectangles">Custom Rectangles</option>
+            <option value="Single Rectangle">Single Rectangle</option>
+          </select>
+        </div>
+        <div>
+          <label for="plate_kerf">Kerf (mm)</label>
+          <input id="plate_kerf" type="number" step="0.01" value="0.0">
+        </div>
+        <div>
+          <label for="plate_margin">Plate margin (mm)</label>
+          <input id="plate_margin" type="number" step="0.1" value="5.0">
+        </div>
+      </div>
+
       <div class="actions">
         <button type="button" class="primary" id="genbtn" onclick="generate()">Generate</button>
       </div>
@@ -374,6 +424,12 @@ def _index_html() -> str:
       do_routing: document.getElementById('routing').checked,
       edge_cuts: document.getElementById('edgecuts').checked,
       firmware_type: document.getElementById('firmware').value,
+      plate_enabled: document.getElementById('plate_enabled').checked,
+      plate_cutout: document.getElementById('plate_cutout').value,
+      plate_cutout_radius: parseFloat(document.getElementById('plate_cutout_radius').value),
+      plate_stab_type: document.getElementById('plate_stab_type').value,
+      plate_kerf: parseFloat(document.getElementById('plate_kerf').value),
+      plate_margin: parseFloat(document.getElementById('plate_margin').value),
     }};
 
     try {{
@@ -448,6 +504,19 @@ async def generate(payload: dict):
         edge_radius=float(payload.get("edge_radius", 3.0)),
         do_routing=bool(payload.get("do_routing", True)),
         firmware_type=payload.get("firmware_type", "both"),
+        plate_enabled=bool(payload.get("plate_enabled", True)),
+        plate_cutout=payload.get("plate_cutout", "MX"),
+        plate_cutout_radius=float(payload.get("plate_cutout_radius", 0.5)),
+        plate_cutout_width=float(payload.get("plate_cutout_width", 14.0)),
+        plate_cutout_height=float(payload.get("plate_cutout_height", 14.0)),
+        plate_stab_type=payload.get("plate_stab_type", "Large"),
+        plate_stab_radius=float(payload.get("plate_stab_radius", 0.5)),
+        plate_stab_width=float(payload.get("plate_stab_width", 7.0)),
+        plate_stab_height=float(payload.get("plate_stab_height", 15.0)),
+        plate_stab_offset=float(payload.get("plate_stab_offset", -0.5)),
+        plate_kerf=float(payload.get("plate_kerf", 0.0)),
+        plate_combine=bool(payload.get("plate_combine", False)),
+        plate_margin=float(payload.get("plate_margin", 5.0)),
     )
     try:
         options.validate()
@@ -472,6 +541,19 @@ async def generate(payload: dict):
         do_routing=options.do_routing,
         matrixfile=matrix_path,
         firmware_type=options.firmware_type,
+        plate_enabled=options.plate_enabled,
+        plate_cutout=options.plate_cutout,
+        plate_cutout_radius=options.plate_cutout_radius,
+        plate_cutout_width=options.plate_cutout_width,
+        plate_cutout_height=options.plate_cutout_height,
+        plate_stab_type=options.plate_stab_type,
+        plate_stab_radius=options.plate_stab_radius,
+        plate_stab_width=options.plate_stab_width,
+        plate_stab_height=options.plate_stab_height,
+        plate_stab_offset=options.plate_stab_offset,
+        plate_kerf=options.plate_kerf,
+        plate_combine=options.plate_combine,
+        plate_margin=options.plate_margin,
     )
     gen = KLEPCBGenerator(opts)
     try:
@@ -509,6 +591,15 @@ async def generate(payload: dict):
         with open(os.path.join(workdir, "gerbers.zip"), "wb") as f:
             f.write(_zip_gerbers(gerber_dir, gfiles))
 
+    # Switch plate: write the DXF + SVG thumbnails to the workdir for download.
+    from plategen import to_dxf, to_svg
+    if getattr(gen, "_plate", None) is not None:
+        _plate = gen._plate
+        with open(os.path.join(workdir, "plate.dxf"), "w") as f:
+            f.write(to_dxf(_plate))
+        with open(os.path.join(workdir, "plate.svg"), "w") as f:
+            f.write(to_svg(_plate))
+
     kb = gen.keyboard
     return {
         "keyboard": kb.name,
@@ -538,7 +629,8 @@ def _build_zip(workdir):
                 arc = os.path.relpath(full, outname)
                 zf.write(full, arc)
         for extra in ("matrix.json", "preview.svg", "board.glb",
-                      "front.svg", "back.svg", "layout.json", "gerbers.zip"):
+                      "front.svg", "back.svg", "layout.json", "gerbers.zip",
+                      "plate.dxf", "plate.svg"):
             p = os.path.join(workdir, extra)
             if os.path.exists(p):
                 zf.write(p, extra)

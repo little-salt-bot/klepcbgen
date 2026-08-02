@@ -105,10 +105,40 @@ class TestWebUI(unittest.TestCase):
         # the viewer/thumbnail outputs are included alongside it.
         for extra in ("matrix.json", "preview.svg", "board.glb",
                       "front.svg", "back.svg", "layout.json",
-                      "gerbers.zip"):
+                      "gerbers.zip", "plate.dxf", "plate.svg"):
             self.assertIn(extra, names)
         # Individual gerber files ship under gerbers/ for fabrication.
         self.assertTrue(any(n.startswith("gerbers/") for n in names))
+
+    def test_plate_generated_and_drives_edge_cuts(self):
+        # Plate generation must produce plate.dxf in the download and its
+        # border must drive the PCB Edge.Cuts outline (not the raw switch bbox).
+        from webui import GeneratorOptions, KLEPCBGenerator
+        import tempfile, shutil, os
+        import plategen
+        tmp = tempfile.mkdtemp()
+        try:
+            kle_path = os.path.join(tmp, "layout.json")
+            with open(kle_path, "w") as f:
+                f.write(_kle_str())
+            gen = KLEPCBGenerator(GeneratorOptions(plate_enabled=True))
+            gen.generate_kicadproject(kle_path, os.path.join(tmp, "kb"))
+            plate = getattr(gen, "_plate", None)
+            self.assertIsNotNone(plate, "plate was not generated")
+            self.assertGreater(len(plate.cutouts), 0)
+            self.assertIsNotNone(plate.border)
+            # The edge cuts must match the plate border in X.
+            pcb = open(os.path.join(tmp, "kb", "kb.kicad_pcb")).read()
+            import re
+            xs = [float(m) for m in re.findall(r"gr_line \(start ([\d.-]+) ", pcb)]
+            if xs:
+                self.assertAlmostEqual(min(xs), plate.min_x, places=0)
+            # DXF export is valid R12.
+            dxf = plategen.to_dxf(plate)
+            self.assertIn("AC1009", dxf)
+            self.assertIn("LWPOLYLINE", dxf)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
     def test_generate_produces_gerbers(self):
         # When kicad-cli is available, the generate response must include a
