@@ -84,6 +84,26 @@ docker run -p 8000:8000 --entrypoint uvicorn klepcbgen webui:app --host 0.0.0.0 
 
 Additional instructions regarding Kicad 6 can be found [here](../../wiki/KiCad-6).
 
+## Generated project dependencies
+
+Every generated project is self-contained and explicitly wired to its KiCad
+dependencies:
+
+- The output directory carries project-local `sym-lib-table` and `fp-lib-table`
+  files listing exactly the stock symbol / footprint libraries the design
+  references, resolved via `${KICAD9_SYMBOL_DIR}` / `${KICAD9_FOOTPRINT_DIR}`.
+- The `.pro` file's `[eeschema/libraries]` section names the same symbol
+  libraries, one entry per library actually used by the chosen controller.
+- The download zip (web UI) includes these files alongside the `.kicad_pcb`,
+  `.sch`, and `.pro`, so the project opens directly in KiCad without any
+  manual library setup.
+
+All symbols and footprints come from KiCad's standard libraries (Device,
+Switch, power, Connector*, MCU_*, Mechanical, and the various footprint packs).
+Because the dependency set is declared explicitly, a missing stock library
+surfaces as a hard error in KiCad rather than a silent missing-symbol
+placeholder.
+
 ## Future improvements
 
 Core features:

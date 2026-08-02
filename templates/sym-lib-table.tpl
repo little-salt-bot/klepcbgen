@@ -1,0 +1,11 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "Device")(type "KiCad")(uri "${KICAD9_SYMBOL_DIR}/Device.kicad_sym")(options "")(descr "Generic devices"))
+  (lib (name "Switch")(type "KiCad")(uri "${KICAD9_SYMBOL_DIR}/Switch.kicad_sym")(options "")(descr "Switch symbols"))
+  (lib (name "power")(type "KiCad")(uri "${KICAD9_SYMBOL_DIR}/power.kicad_sym")(options "")(descr "Power symbols"))
+  (lib (name "Connector")(type "KiCad")(uri "${KICAD9_SYMBOL_DIR}/Connector.kicad_sym")(options "")(descr "Connector symbols"))
+  (lib (name "Connector_Generic")(type "KiCad")(uri "${KICAD9_SYMBOL_DIR}/Connector_Generic.kicad_sym")(options "")(descr "Generic connector symbols"))
+  (lib (name "MCU_Module")(type "KiCad")(uri "${KICAD9_SYMBOL_DIR}/MCU_Module.kicad_sym")(options "")(descr "MCU module symbols"))
+  (lib (name "MCU_Microchip_ATmega")(type "KiCad")(uri "${KICAD9_SYMBOL_DIR}/MCU_Microchip_ATmega.kicad_sym")(options "")(descr "Microchip ATmega MCU symbols"))
+  (lib (name "Mechanical")(type "KiCad")(uri "${KICAD9_SYMBOL_DIR}/Mechanical.kicad_sym")(options "")(descr "Mechanical symbols"))
+)

@@ -249,6 +249,38 @@ class TestGenerator(unittest.TestCase):
         self.assertEqual(mf["matrix_lines"], 14)
         self.assertEqual(mf["num_keys"], 82)
 
+    def test_library_tables_generated(self):
+        # Every controller output must carry project-local lib tables plus a
+        # .pro that lists exactly the stock symbol libraries it references.
+        for controller in ("atmega32u4", "rp2040", "promicro"):
+            gen = self._generate(controller=controller)
+            for f in ("sym-lib-table", "fp-lib-table"):
+                p = os.path.join(self.workdir, f)
+                self.assertTrue(os.path.exists(p),
+                                f"{controller} missing {f}")
+            pro = os.path.join(self.workdir, "out.pro")
+            pro_txt = open(pro).read()
+            libs = KLEPCBGenerator.schematic_libs(controller)
+            self.assertIn("[eeschema/libraries]", pro_txt)
+            for i, lib in enumerate(libs, 1):
+                self.assertIn(f"LibName{i}={lib}", pro_txt,
+                              f"{controller} missing lib {lib}")
+            # No lib beyond the declared set should be listed.
+            n = len(libs)
+            self.assertNotIn(f"LibName{n+1}=", pro_txt,
+                             f"{controller} has extra libs")
+
+    def test_schematic_libs_exact(self):
+        # atmega32u4 has the MCU + mechanical, rp2040 the module, promicro only
+        # generic base libs.
+        self.assertEqual(KLEPCBGenerator.schematic_libs("atmega32u4")[-1],
+                         "Mechanical")
+        self.assertIn("MCU_Microchip_ATmega",
+                      KLEPCBGenerator.schematic_libs("atmega32u4"))
+        self.assertIn("MCU_Module", KLEPCBGenerator.schematic_libs("rp2040"))
+        self.assertNotIn("MCU_Module",
+                         KLEPCBGenerator.schematic_libs("promicro"))
+
 
 if __name__ == "__main__":
     unittest.main()

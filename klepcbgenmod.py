@@ -1024,12 +1024,54 @@ class KLEPCBGenerator:
             )
 
     def generate_project(self, outname):
-        """Generate the project file"""
+        """Generate the project file (.pro) plus project-local symbol and
+        footprint library tables so the generated project is self-contained:
+        every symbol/footprint it references resolves to a stock KiCad library
+        via ${KICAD9_SYMBOL_DIR} / ${KICAD9_FOOTPRINT_DIR}, and the .pro lists
+        exactly those libraries. This is a documented dependency set, so a
+        missing stock library shows up as a hard error instead of a silent
+        missing-symbol placeholder."""
         prj = self.jinja_env.get_template("kicadproject.tpl")
         with open(
                 outname + "/" + os.path.basename(os.path.normpath(outname)) + ".pro", "w+", newline="\n", encoding="utf-8"
         ) as out_file:
-            out_file.write(prj.render())
+            out_file.write(prj.render(schematic_libs=self.schematic_libs(
+                self.options.controller)))
+
+        sym_tbl = self.jinja_env.get_template("sym-lib-table.tpl")
+        with open(os.path.join(outname, "sym-lib-table"), "w", newline="\n",
+                  encoding="utf-8") as f:
+            f.write(sym_tbl.render())
+
+        fp_tbl = self.jinja_env.get_template("fp-lib-table.tpl")
+        with open(os.path.join(outname, "fp-lib-table"), "w", newline="\n",
+                  encoding="utf-8") as f:
+            f.write(fp_tbl.render())
+
+    @staticmethod
+    def schematic_libs(controller=None):
+        """Stock KiCad symbol libraries referenced by the generated schematic
+        for a given controller (default: all controllers' libraries)."""
+        base = [
+            "Device", "Switch", "power", "Connector", "Connector_Generic",
+        ]
+        extra = {
+            "atmega32u4": ["MCU_Microchip_ATmega", "Mechanical"],
+            "rp2040": ["MCU_Module"],
+            "promicro": [],
+        }
+        if controller:
+            libs = list(base)
+            for lib in extra.get(controller, []):
+                if lib not in libs:
+                    libs.append(lib)
+            return libs
+        merged = list(base)
+        for libs in extra.values():
+            for lib in libs:
+                if lib not in merged:
+                    merged.append(lib)
+        return merged
 
     def generate_firmware(self, outname):
         """Generate firmware source files from the duplex matrix wiring and the

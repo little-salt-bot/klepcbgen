@@ -31,3 +31,5 @@ NetIExt=net
 version=1
 LibDir=
 [eeschema/libraries]
+{% for lib in schematic_libs %}LibName{{ loop.index }}={{ lib }}
+{% endfor %}
