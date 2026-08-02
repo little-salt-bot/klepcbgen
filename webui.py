@@ -702,19 +702,6 @@ async def generate(payload: dict):
     back_ok = _export_layer_svg(pcb_path, "B.Cu,Edge.Cuts", True,
                                 os.path.join(workdir, "back.svg"))
 
-
-    zipbuf = io.BytesIO()
-    with zipfile.ZipFile(zipbuf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for root, _dirs, files in os.walk(outname):
-            for fn in files:
-                full = os.path.join(root, fn)
-                arc = os.path.relpath(full, outname)
-                zf.write(full, arc)
-        if os.path.exists(matrix_path):
-            zf.write(matrix_path, "matrix.json")
-    zipbuf.seek(0)
-    zip_data = zipbuf.getvalue()
-
     kb = gen.keyboard
     return {
         "keyboard": kb.name,
@@ -725,26 +712,36 @@ async def generate(payload: dict):
         "viewer3d": f"/glb?d={workdir}" if glb_ok else None,
         "viewer_front": f"/layer?d={workdir}&n=front" if front_ok else None,
         "viewer_back": f"/layer?d={workdir}&n=back" if back_ok else None,
-        "zip_bytes": len(zip_data),
+        "zip_bytes": len(_build_zip(workdir)),
     }
 
 
-@app.get("/download")
-async def download(d: str):
-    outname = os.path.join(d, "kb")
-    matrix_path = os.path.join(d, "matrix.json")
+def _build_zip(workdir):
+    """Zip the whole generated project: the KiCad files live at the archive
+    root (so opening the zip directly in KiCad works), and the extra viewer
+    outputs (3D model, layer SVGs, preview, matrix, raw KLE input) sit
+    alongside them so the download is the complete project."""
     zipbuf = io.BytesIO()
     with zipfile.ZipFile(zipbuf, "w", zipfile.ZIP_DEFLATED) as zf:
+        outname = os.path.join(workdir, "kb")
         for root, _dirs, files in os.walk(outname):
             for fn in files:
                 full = os.path.join(root, fn)
                 arc = os.path.relpath(full, outname)
                 zf.write(full, arc)
-        if os.path.exists(matrix_path):
-            zf.write(matrix_path, "matrix.json")
+        for extra in ("matrix.json", "preview.svg", "board.glb",
+                      "front.svg", "back.svg", "layout.json"):
+            p = os.path.join(workdir, extra)
+            if os.path.exists(p):
+                zf.write(p, extra)
     zipbuf.seek(0)
+    return zipbuf.getvalue()
+
+
+@app.get("/download")
+async def download(d: str):
     return Response(
-        zipbuf.getvalue(),
+        _build_zip(d),
         media_type="application/zip",
         headers={"Content-Disposition": "attachment; filename=keyboard.zip"},
     )

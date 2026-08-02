@@ -101,6 +101,11 @@ class TestWebUI(unittest.TestCase):
         names = zf.namelist()
         self.assertTrue(any(n.endswith(".kicad_pcb") for n in names))
         self.assertIn("matrix.json", names)
+        # The download must be the complete project, not just the KiCad dir:
+        # the viewer/thumbnail outputs are included alongside it.
+        for extra in ("matrix.json", "preview.svg", "board.glb",
+                      "front.svg", "back.svg", "layout.json"):
+            self.assertIn(extra, names)
 
     def test_generate_produces_3d_viewer(self):
         # When kicad-cli is available, the generate response must include a
