@@ -58,8 +58,13 @@ a keyboard designed using the Keyboard Layout Editor \
     )
 
     parser.add_argument(
-        "--edge-margin", dest="edge_margin", type=float, default=5.0,
+        "--edge-margin", dest="edge_margin", type=float, default=3.0,
         help="Board outline margin (mm) around the outermost keyswitch footprints.",
+    )
+
+    parser.add_argument(
+        "--edge-radius", dest="edge_radius", type=float, default=3.0,
+        help="Corner radius (mm) for the board outline (0 for sharp corners).",
     )
 
     parser.add_argument(
@@ -98,6 +103,7 @@ if __name__ == "__main__":
         controller=arguments.controller,
         edge_margin=arguments.edge_margin,
         edge_cuts=arguments.edge_cuts,
+        edge_radius=arguments.edge_radius,
         do_routing=arguments.routing,
         matrixfile=arguments.matrixfile,
         firmware_type=arguments.firmware_type,

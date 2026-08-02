@@ -1,29 +1,19 @@
-"""Lightweight SVG renderer for generated klepcbgen boards.
-
-Parses the generated .kicad_pcb and draws an SVG thumbnail showing the board
-outline (Edge.Cuts), switch footprints, and routed copper traces. No KiCad
-dependency required — reads the S-expression file directly.
-"""
 import re
-
-
-def _parse_points(s):
-    """Parse repeated (x y) tuples from a string, returning list of (x,y) floats."""
-    return [(float(a), float(b)) for a, b in re.findall(r"\(([\d.\-]+) ([\d.\-]+)\)", s)]
 
 
 def render_pcb_svg(pcb_path):
     with open(pcb_path) as f:
         data = f.read()
 
-    # Edge cuts (board outline) as line segments
-    edge_segs = []
-    edge_lines = re.findall(
-        r"\(gr_line \(start ([\d.\-]+) ([\d.\-]+)\) \(end ([\d.\-]+) ([\d.\-]+)\).*?Edge\.Cuts",
-        data,
-    )
-    for x1, y1, x2, y2 in edge_lines:
-        edge_segs.append(((float(x1), float(y1)), (float(x2), float(y2))))
+    # Edge cuts (board outline): ordered gr_line segments emitted clockwise
+    # around the outline (rounded corners are already a polyline of lines).
+    edge_lines = [
+        (float(x1), float(y1), float(x2), float(y2))
+        for x1, y1, x2, y2 in re.findall(
+            r"\(gr_line \(start ([\d.\-]+) ([\d.\-]+)\) \(end ([\d.\-]+) ([\d.\-]+)\).*?Edge\.Cuts",
+            data,
+        )
+    ]
 
     # Switch footprints (centers): the (at x y) line holds plain "x y"
     switch_pts = []
@@ -41,9 +31,9 @@ def render_pcb_svg(pcb_path):
     # Compute bounds (include switches + edge cuts)
     all_x = [p[0] for p in switch_pts]
     all_y = [p[1] for p in switch_pts]
-    for (a, b), (c, d) in edge_segs:
-        all_x += [a, c]
-        all_y += [b, d]
+    for x1, y1, x2, y2 in edge_lines:
+        all_x += [x1, x2]
+        all_y += [y1, y2]
     if not all_x:
         all_x, all_y = [0], [0]
     min_x, max_x = min(all_x), max(all_x)
@@ -63,18 +53,15 @@ def render_pcb_svg(pcb_path):
     def ty(y):
         return (max_y - y) * scale  # flip Y for SVG
 
-    def rect(x, y, w, h):
-        return f'<rect x="{tx(x)}" y="{ty(y+h)}" width="{w*scale}" height="{h*scale}"/>'
-
     parts = []
     parts.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{W*scale}" height="{H*scale}" viewBox="0 0 {W*scale} {H*scale}">')
     parts.append(f'<rect width="100%" height="100%" fill="#111"/>')
 
-    # Board outline (fill + stroke) from edge segments
-    if edge_segs:
-        path = "M " + f"{tx(edge_segs[0][0][0])} {ty(edge_segs[0][0][1])} "
-        for (x, y), _ in edge_segs:
-            path += f"L {tx(x)} {ty(y)} "
+    # Board outline (fill + stroke): chain line segments in order.
+    if edge_lines:
+        path = f"M {tx(edge_lines[0][0])} {ty(edge_lines[0][1])} "
+        for x1, y1, x2, y2 in edge_lines:
+            path += f"L {tx(x2)} {ty(y2)} "
         parts.append(f'<path d="{path}Z" fill="#1a1a1a" stroke="#0f0" stroke-width="2"/>')
 
     # Copper traces (B.Cu dark green, F.Cu bright green)

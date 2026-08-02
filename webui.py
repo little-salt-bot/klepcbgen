@@ -272,7 +272,11 @@ def _index_html() -> str:
         </div>
         <div>
           <label for="margin">Edge margin (mm)</label>
-          <input id="margin" type="number" step="0.1" value="5.0">
+          <input id="margin" type="number" step="0.1" value="3.0">
+        </div>
+        <div>
+          <label for="radius">Edge radius (mm)</label>
+          <input id="radius" type="number" step="0.1" value="3.0">
         </div>
       </div>
 
@@ -357,6 +361,7 @@ def _index_html() -> str:
       diode_footprint: document.getElementById('diodfp').value,
       key_pitch: parseFloat(document.getElementById('pitch').value),
       edge_margin: parseFloat(document.getElementById('margin').value),
+      edge_radius: parseFloat(document.getElementById('radius').value),
       do_routing: document.getElementById('routing').checked,
       edge_cuts: document.getElementById('edgecuts').checked,
       firmware_type: document.getElementById('firmware').value,
@@ -425,8 +430,9 @@ async def generate(payload: dict):
         key_footprint=payload.get("key_footprint", "cherry_mx"),
         diode_footprint=payload.get("diode_footprint", "0805"),
         controller=payload.get("controller", "atmega32u4"),
-        edge_margin=float(payload.get("edge_margin", 5.0)),
+        edge_margin=float(payload.get("edge_margin", 3.0)),
         edge_cuts=bool(payload.get("edge_cuts", True)),
+        edge_radius=float(payload.get("edge_radius", 3.0)),
         do_routing=bool(payload.get("do_routing", True)),
         firmware_type=payload.get("firmware_type", "both"),
     )
@@ -449,6 +455,7 @@ async def generate(payload: dict):
         controller=options.controller,
         edge_margin=options.edge_margin,
         edge_cuts=options.edge_cuts,
+        edge_radius=options.edge_radius,
         do_routing=options.do_routing,
         matrixfile=matrix_path,
         firmware_type=options.firmware_type,

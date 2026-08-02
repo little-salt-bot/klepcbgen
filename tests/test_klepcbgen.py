@@ -145,9 +145,28 @@ class TestGenerator(unittest.TestCase):
         self.assertEqual(len(re.findall(r"\bRow_|\bCol_", sch)), 0)
 
     def test_edge_cuts(self):
-        self._generate()
+        self._generate(edge_radius=0)
         pcb = open(os.path.join(self.workdir, "out.kicad_pcb")).read()
         self.assertEqual(len(re.findall(r"gr_line.*Edge\.Cuts", pcb)), 4)
+
+    def test_edge_cuts_rounded(self):
+        # Rounded corners (default radius) emit a polyline with more segments.
+        self._generate(edge_radius=3.0)
+        pcb = open(os.path.join(self.workdir, "out.kicad_pcb")).read()
+        self.assertGreater(len(re.findall(r"gr_line.*Edge\.Cuts", pcb)), 4)
+        # The outline must still be closed: first and last points coincide.
+        segs = [
+            (float(a), float(b), float(c), float(d))
+            for a, b, c, d in re.findall(
+                r"gr_line \(start ([\d.\-]+) ([\d.\-]+)\) \(end ([\d.\-]+) ([\d.\-]+)\).*?Edge\.Cuts",
+                pcb,
+            )
+        ]
+        self.assertGreater(len(segs), 4)
+        first = (segs[0][0], segs[0][1])
+        last = (segs[-1][2], segs[-1][3])
+        self.assertAlmostEqual(first[0], last[0], places=6)
+        self.assertAlmostEqual(first[1], last[1], places=6)
 
     def test_no_edge_cuts(self):
         self._generate(edge_cuts=False)

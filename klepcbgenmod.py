@@ -97,8 +97,9 @@ class GeneratorOptions:
     key_footprint: str = "cherry_mx"   # KEY_FOOTPRINTS key
     diode_footprint: str = "0805"      # DIODE_FOOTPRINTS key
     controller: str = "atmega32u4"     # CONTROLLERS key
-    edge_margin: float = 5.0           # mm of board outline around switch bbox
+    edge_margin: float = 3.0           # mm of board outline around switch bbox
     edge_cuts: bool = True             # emit an Edge.Cuts board outline
+    edge_radius: float = 3.0           # mm corner radius on the board outline
     do_routing: bool = True            # auto-route matrix lines
     matrixfile: str = None             # path to emit matrix wiring JSON
     firmware_type: str = "both"        # none|qmk|zmk|both
@@ -123,6 +124,8 @@ class GeneratorOptions:
             )
         if self.edge_margin < 0:
             raise ValueError("edge_margin must be >= 0")
+        if self.edge_radius < 0:
+            raise ValueError("edge_radius must be >= 0")
         if self.firmware_type not in ("none", "qmk", "zmk", "both"):
             raise ValueError("firmware_type must be none|qmk|zmk|both")
 
@@ -622,10 +625,19 @@ class KLEPCBGenerator:
         return components_section, component_count
 
     def compute_edge_cuts(self):
-        """Compute the board outline rectangle (Edge.Cuts) based on the bounding
-           box of all keyswitch footprints plus a configurable margin. Returns a
-           string of (gr_line) entries, or empty string if edge_cuts is disabled.
+        """Compute the board outline (Edge.Cuts) based on the bounding box of
+           all keyswitch footprints plus a configurable margin, with optional
+           rounded corners.
+
+           Corners are approximated with a short polyline of gr_line segments
+           rather than gr_arc. The generated board file is KiCad 5.x format
+           (version 20171130); kicad-cli 9.x fails to load gr_arc in that older
+           format, so polylines are the version-safe way to round corners.
+
+           Returns a string of (gr_line) entries, or empty string if edge_cuts
+           is disabled.
         """
+        import math
         if not self.options.edge_cuts:
             return ""
         if not self.keyboard.keys:
@@ -633,6 +645,7 @@ class KLEPCBGenerator:
 
         key_pitch = self.options.key_pitch
         margin = self.options.edge_margin
+        radius = self.options.edge_radius
         key_origin_x = -0.5 * key_pitch
         key_origin_y = -0.5 * key_pitch
 
@@ -652,14 +665,60 @@ class KLEPCBGenerator:
         x1 = max_x + margin
         y1 = max_y + margin
 
-        # Emit four edge lines (KiCad 5 gr_line format)
+        # Cap the corner radius at half the smaller side so it never overlaps.
+        r = max(0.0, min(radius, (x1 - x0) / 2, (y1 - y0) / 2))
         w = 0.1
-        lines = [
-            f"  (gr_line (start {x0} {y0}) (end {x1} {y0}) (angle 0) (layer Edge.Cuts) (width {w}))",
-            f"  (gr_line (start {x1} {y0}) (end {x1} {y1}) (angle 0) (layer Edge.Cuts) (width {w}))",
-            f"  (gr_line (start {x1} {y1}) (end {x0} {y1}) (angle 0) (layer Edge.Cuts) (width {w}))",
-            f"  (gr_line (start {x0} {y1}) (end {x0} {y0}) (angle 0) (layer Edge.Cuts) (width {w}))",
-        ]
+
+        if r <= 0:
+            # No rounding: four straight lines (square outline).
+            return "\n".join([
+                f"  (gr_line (start {x0} {y0}) (end {x1} {y0}) (angle 0) (layer Edge.Cuts) (width {w}))",
+                f"  (gr_line (start {x1} {y0}) (end {x1} {y1}) (angle 0) (layer Edge.Cuts) (width {w}))",
+                f"  (gr_line (start {x1} {y1}) (end {x0} {y1}) (angle 0) (layer Edge.Cuts) (width {w}))",
+                f"  (gr_line (start {x0} {y1}) (end {x0} {y0}) (angle 0) (layer Edge.Cuts) (width {w}))",
+            ]) + "\n"
+
+        # Number of straight segments per quarter-circle corner.
+        ARC_SEGS = 8
+
+        def corner_points(cx, cy, from_angle_deg, to_angle_deg):
+            """Return [cx,cy]+ list of points tracing a 90-deg arc from
+               from_angle to to_angle (0 deg = +X, CCW)."""
+            pts = []
+            steps = ARC_SEGS
+            for i in range(1, steps + 1):
+                a = math.radians(from_angle_deg +
+                                 (to_angle_deg - from_angle_deg) * i / steps)
+                pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+            return pts
+
+        lines = []
+        # Walk the outline clockwise from the bottom-left straight edge start.
+        # Bottom edge (y0) from x0+r to x1-r, then corner to right edge, etc.
+        outline = []
+        outline.append((x0 + r, y0))                       # bottom-left inner
+        outline.append((x1 - r, y0))                       # bottom-right inner
+        outline += corner_points(x1, y0, -90, 0)           # bottom-right corner
+        outline.append((x1, y1 - r))                       # right-top inner
+        outline += corner_points(x1, y1, 0, 90)            # top-right corner
+        outline.append((x0 + r, y1))                       # top-left inner
+        outline += corner_points(x0, y1, 90, 180)          # top-left corner
+        outline.append((x0, y0 + r))                       # left-bottom inner
+        outline += corner_points(x0, y0, 180, 270)         # bottom-left corner
+
+        # Emit line segments connecting consecutive outline points.
+        for i in range(len(outline) - 1):
+            ax, ay = outline[i]
+            bx, by = outline[i + 1]
+            lines.append(
+                f"  (gr_line (start {ax} {ay}) (end {bx} {by}) (angle 0) (layer Edge.Cuts) (width {w}))"
+            )
+        # Close the loop back to the first point.
+        ax, ay = outline[-1]
+        bx, by = outline[0]
+        lines.append(
+            f"  (gr_line (start {ax} {ay}) (end {bx} {by}) (angle 0) (layer Edge.Cuts) (width {w}))"
+        )
         return "\n".join(lines) + "\n"
 
 
