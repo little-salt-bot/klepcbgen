@@ -94,6 +94,12 @@ CONTROLLER_REGIONS = {
     "rp2040":     (56, 24),   # Raspberry Pi Pico module via 2x20 pin header
 }
 
+# Physical size (mm) of one keyswitch footprint: half this is the radius used
+# around each switch center when computing the board outline. Cherry MX / ALPS
+# switches are 14x14mm (half = 7mm). This is independent of key_pitch (the
+# spacing between switch centers), which is larger.
+SWITCH_HALF_SIZE = 7.0  # 14x14mm switch -> 7mm half-extent
+
 # Gap (mm) between the switch matrix area and the controller block on the PCB.
 CONTROLLER_GAP = 6.0
 
@@ -651,18 +657,19 @@ class KLEPCBGenerator:
         return components_section, component_count
 
     def _switch_bbox(self):
-        """Return (min_x, min_y, max_x, max_y) of the switch footprints (half a
-        key pitch around each switch center) in PCB mm."""
+        """Return (min_x, min_y, max_x, max_y) of the switch footprints in PCB
+        mm. Each switch is treated as a SWITCH_HALF_SIZE-radius square around
+        its center (the physical 14x14mm switch), independent of key_pitch."""
         key_pitch = self.options.key_pitch
         key_origin_x = -0.5 * key_pitch
         key_origin_y = -0.5 * key_pitch
         xs = [key_origin_x + k.x_unit * key_pitch for k in self.keyboard.keys]
         ys = [key_origin_y + k.y_unit * key_pitch for k in self.keyboard.keys]
         return (
-            min(xs) - 0.5 * key_pitch,
-            min(ys) - 0.5 * key_pitch,
-            max(xs) + 0.5 * key_pitch,
-            max(ys) + 0.5 * key_pitch,
+            min(xs) - SWITCH_HALF_SIZE,
+            min(ys) - SWITCH_HALF_SIZE,
+            max(xs) + SWITCH_HALF_SIZE,
+            max(ys) + SWITCH_HALF_SIZE,
         )
 
     def _shift_control_region(self, control_text, cx, cy):
