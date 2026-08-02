@@ -87,37 +87,39 @@ def _rr_points(cx, cy, width, height, radius, kerf=0.0, n=8):
 
     Width/height are the outer dims; kerf shrinks them (laser burn). The
     rectangle is centered on (cx, cy). Returns an open list of (x, y)
-    vertices tracing the perimeter (caller closes it).
+    vertices tracing the perimeter clockwise (caller closes it). Every
+    straight edge AND corner arc is emitted, so the polygon bbox equals the
+    full width/height regardless of corner radius (a common plate bug is
+    dropping the straight edges, which shrinks the outline by `radius`).
     """
     w = (width - kerf) / 2.0
     h = (height - kerf) / 2.0
     r = max(0.0, min(radius, w, h))
     pts = []
     if r <= 0:
-        # Plain rectangle, 4 corners.
+        # Plain rectangle, 4 corners (clockwise from bottom-right).
         return [(cx + w, cy + h), (cx - w, cy + h),
                 (cx - w, cy - h), (cx + w, cy - h)]
-    # 4 straight edges with rounded corners. Trace clockwise from +x,-y.
-    corners = [
-        (cx + w, cy + h),   # bottom-right, arc from -90 to 0
-        (cx + w, cy - h),   # top-right, arc 0 to 90
-        (cx - w, cy - h),   # top-left, arc 90 to 180
-        (cx - w, cy + h),   # bottom-left, arc 180 to 270
-    ]
-    # arc centers (inset by r from both edges at each corner)
-    centers = [
-        (cx + w - r, cy + h - r),
-        (cx + w - r, cy - h + r),
-        (cx - w + r, cy - h + r),
-        (cx - w + r, cy + h - r),
-    ]
-    a0 = [-90, 0, 90, 180]
-    a1 = [0, 90, 180, 270]
-    for i in range(4):
+
+    def arc(cx_, cy_, a0, a1):
         for s in range(n):
-            a = math.radians(a0[i] + (a1[i] - a0[i]) * (s + 1) / n)
-            pts.append((centers[i][0] + r * math.cos(a),
-                        centers[i][1] + r * math.sin(a)))
+            a = math.radians(a0 + (a1 - a0) * (s + 1) / n)
+            pts.append((cx_ + r * math.cos(a), cy_ + r * math.sin(a)))
+
+    # Clockwise from bottom-right: bottom edge, BR arc, right edge, TR arc,
+    # top edge, TL arc, left edge, BL arc.
+    pts.append((cx + w - r, cy + h))            # bottom edge start (bottom-right inner)
+    pts.append((cx - w + r, cy + h))            # bottom edge end (bottom-left inner)
+    arc(cx - w + r, cy + h - r, 270, 180)       # bottom-left corner
+    pts.append((cx - w, cy + h - r))            # left edge start
+    pts.append((cx - w, cy - h + r))            # left edge end (top-left inner)
+    arc(cx - w + r, cy - h + r, 180, 90)        # top-left corner
+    pts.append((cx - w + r, cy - h))            # top edge start
+    pts.append((cx + w - r, cy - h))            # top edge end (top-right inner)
+    arc(cx + w - r, cy - h + r, 90, 0)          # top-right corner
+    pts.append((cx + w, cy - h + r))            # right edge start
+    pts.append((cx + w, cy + h - r))            # right edge end (bottom-right inner)
+    arc(cx + w - r, cy + h - r, 0, -90)         # bottom-right corner
     return pts
 
 

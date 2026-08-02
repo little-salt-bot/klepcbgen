@@ -104,6 +104,32 @@ SWITCH_HALF_SIZE = 7.0  # 14x14mm switch -> 7mm half-extent
 CONTROLLER_GAP = 6.0
 
 
+def _footprint_switch_offset(key_footprint):
+    """Return (dx, dy) in mm from a keyswitch footprint's placement origin to
+    the physical switch center, keyed by the footprint type actually placed.
+
+    The stock KiCad keyswitch footprints are NOT centered on their origin: the
+    physical switch (plunger / housing) sits offset from (0,0). The plate
+    cutouts must center on the physical switch, so they align with where the
+    footprints sit on the board (and the edge outline derived from them).
+
+    Verified directly from the installed KiCad library:
+      - Cherry MX (SW_Cherry_MX_*u_PCB): 4mm plunger at (-2.54, +5.08); SilkS
+        body spans X -9.525..4.445 (center -2.54), Y -1.905..12.065 (center
+        5.08) for every width (1u..6.25u).
+      - Matias/Alps (SW_Alps_Matias_*u): SilkS body X -11.35..6.35 (center
+        -2.5), Y -2.75..11.75 (center 4.5).
+      - Kailh Choc V2: center assumed at (0,0) (unverified here; the Choc
+        library is not installed on this host).
+    """
+    fp = (key_footprint or "cherry_mx").lower()
+    if fp == "alps":
+        return (-2.5, 4.5)
+    if fp == "choc":
+        return (0.0, 0.0)  # Choc library not present; assume centered
+    return (-2.54, 5.08)  # cherry_mx (default)
+
+
 def controller_lines_available(controller):
     """Return how many duplex matrix lines a controller can drive."""
     return len(CONTROLLER_PINS.get(controller, []))
@@ -851,7 +877,15 @@ class KLEPCBGenerator:
         Returns the plategen.Plate instance (or None if plate generation is
         disabled). The plate's outer border is what drives the PCB Edge.Cuts
         outline, so the plate and board edges always agree. The plate file is
-        the MORE STABLE reference than the individual footprints."""
+        the MORE STABLE reference than the individual footprints.
+
+        The plate cutouts are centered on the PHYSICAL switch center, not the
+        footprint origin. The stock KiCad keyswitch footprints are not centered
+        on their placement origin: the physical switch (plunger) sits offset
+        from (0,0) by a footprint-specific amount. The plate must match where
+        the real switch sits, otherwise the cutouts (and the edge outline
+        derived from them) drift from the footprints on the board.
+        """
         from plategen import Plate, PlateConfig
         opts = self.options
         if not opts.plate_enabled:
@@ -875,9 +909,15 @@ class KLEPCBGenerator:
         plate = Plate(cfg)
         pitch = opts.key_pitch
         origin = -0.5 * pitch  # top-left switch center at (0,0)
+        # Physical switch center offset from the footprint origin (board mm).
+        # The stock KiCad keyswitch footprints place the physical switch
+        # (plunger) offset from (0,0); keyed by the footprint actually placed.
+        fdx, fdy = _footprint_switch_offset(opts.key_footprint)
         for key in self.keyboard.keys:
-            cx = origin + key.x_unit * pitch
-            cy = origin + key.y_unit * pitch
+            # Center the cutout on the PHYSICAL switch so the plate matches
+            # where the footprints sit on the board.
+            cx = origin + key.x_unit * pitch + fdx
+            cy = origin + key.y_unit * pitch + fdy
             plate.add_key(cx, cy, key.width, key.height,
                           rotation=getattr(key, "rot", 0))
         plate.finalize_border()
@@ -920,15 +960,6 @@ class KLEPCBGenerator:
             margin = 0.0
         else:
             min_x, min_y, max_x, max_y = self._switch_bbox()
-
-        # Include the controller + support block in the outline so it always
-        # lands on the board, regardless of layout size. Uses the collision-free
-        # (resolved) anchor so the outline clears the controller parts.
-        cx, cy, cw, ch = self.controller_anchor_resolved()
-        min_x = min(min_x, cx)
-        min_y = min(min_y, cy)
-        max_x = max(max_x, cx + cw)
-        max_y = max(max_y, cy + ch)
 
         # Add configurable margin
         x0 = min_x - margin
