@@ -208,6 +208,36 @@ def _index_html() -> str:
     max-width: none; max-height: none;
   }}
   .viewbar .vbtn:disabled {{ opacity: .4; cursor: not-allowed; }}
+  #viewcube {{
+    position: absolute; top: 14px; right: 14px; z-index: 5;
+    display: none;
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.4);
+  }}
+  #viewcube.active {{ display: block; }}
+  .cube-grid {{
+    display: grid; grid-template-columns: repeat(3, 44px);
+    gap: 2px;
+  }}
+  .cube-face {{
+    width: 44px; height: 34px; border: none; border-radius: 4px;
+    background: transparent; color: var(--muted);
+    font-size: 10px; font-weight: 600; cursor: pointer; font-family: inherit;
+    display: grid; place-items: center; transition: background .12s, color .12s;
+  }}
+  .cube-face:hover {{ background: rgba(79,140,255,.18); color: var(--text); }}
+  .cube-face[data-key="front"]  {{ grid-column: 2; grid-row: 2; }}
+  .cube-face[data-key="back"]   {{ grid-column: 2; grid-row: 1; }}
+  .cube-face[data-key="top"]    {{ grid-column: 2; grid-row: 3; }}
+  .cube-face[data-key="right"]  {{ grid-column: 3; grid-row: 2; }}
+  .cube-face[data-key="left"]   {{ grid-column: 1; grid-row: 2; }}
+  .cube-face[data-key="bottom"] {{ grid-column: 1; grid-row: 3; }}
+  .cube-face[data-key="frontTopRight"] {{ grid-column: 3; grid-row: 1; }}
+  .cube-face[data-key="frontTopLeft"]  {{ grid-column: 1; grid-row: 1; }}
+  .cube-face[data-key="backTopRight"]  {{ grid-column: 3; grid-row: 3; }}
+  .cube-face[data-key="backTopLeft"]   {{ grid-column: 1; grid-row: 3; }}
+  .cube-face.primary {{ background: rgba(79,140,255,.25); color: #fff; }}
   #preview .placeholder {{ color: var(--muted); text-align: center; position: absolute; inset: 0; display: grid; place-items: center; }}
   #preview .placeholder svg {{ margin-bottom: 8px; opacity: .5; }}
   #status {{
@@ -327,6 +357,9 @@ def _index_html() -> str:
         <div class="svgwrap" id="svgwrap" style="display:none">
           <img id="pcbsvg" alt="PCB layer view" draggable="false">
         </div>
+        <div class="viewcube-wrap" id="viewcube">
+          <div class="cube-grid" id="cubegrid"></div>
+        </div>
         <div class="placeholder" id="placeholder">
           <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <rect x="3" y="5" width="18" height="14" rx="2"/>
@@ -436,9 +469,11 @@ def _index_html() -> str:
       canvas.style.display = 'block';
       if (d3d) {{
         // force re-render after switching container display
+        setCubeVisible(true);
         if (window.__setViewerSize) window.__setViewerSize();
       }} else {{
         canvas.style.display = 'none';
+        setCubeVisible(false);
         placeholder.style.display = 'grid';
         placeholder.innerHTML = '<div class="errorbox">3D preview unavailable.</div>';
       }}
@@ -449,6 +484,7 @@ def _index_html() -> str:
     canvas.style.display = 'none';
     placeholder.style.display = 'none';
     wrap.style.display = 'grid';
+    setCubeVisible(false);
     if (img.src !== url) {{
       img.src = url || '';
     }}
@@ -460,6 +496,40 @@ def _index_html() -> str:
     if (img.complete && img.naturalWidth) fitSvg();
   }}
 
+  // Build the 3D view cube (Front/Back/Left/Right/Top/Bottom + iso corners).
+  // Shown only while the 3D viewer is active.
+  const cubeDefs = [
+    {{ key: 'back', label: 'B' }},
+    {{ key: 'frontTopLeft', label: 'FLT' }},
+    {{ key: 'frontTopRight', label: 'FRT' }},
+    {{ key: 'left', label: 'L' }},
+    {{ key: 'front', label: 'F', primary: true }},
+    {{ key: 'right', label: 'R' }},
+    {{ key: 'backTopLeft', label: 'BLT' }},
+    {{ key: 'top', label: 'T' }},
+    {{ key: 'backTopRight', label: 'BRT' }},
+  ];
+  function buildViewCube() {{
+    const grid = document.getElementById('cubegrid');
+    grid.innerHTML = '';
+    cubeDefs.forEach(function (d) {{
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cube-face' + (d.primary ? ' primary' : '');
+      b.dataset.key = d.key;
+      b.textContent = d.label;
+      b.title = d.key;
+      b.onclick = function () {{
+        if (window.__setView) window.__setView(d.key);
+      }};
+      grid.appendChild(b);
+    }});
+  }}
+  function setCubeVisible(vis) {{
+    document.getElementById('viewcube').classList.toggle('active', vis);
+  }}
+  buildViewCube();
+ 
   function loadExample() {{
     document.getElementById('kle').value = JSON.stringify(example, null, 2);
     document.getElementById('kle').focus();

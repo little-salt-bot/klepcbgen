@@ -8,6 +8,61 @@ let renderer = null;
 let scene = null;
 let camera = null;
 let controls = null;
+// The loaded board object (set after GLB load) so view-cube snap can frame it.
+let boardObj = null;
+
+const VIEWS = {
+  // Board is flat in X-Z, normal along Y. Each entry is a camera position
+  // direction (normalized by length) pointing at the target from that view.
+  // Y is board thickness; +Y is front face, -Y is back.
+  front:   { dir: [0, 1, 0],   label: 'Front' },   // +Y
+  back:    { dir: [0, -1, 0],  label: 'Back' },    // -Y
+  right:   { dir: [1, 0, 0],   label: 'Right' },   // +X
+  left:    { dir: [-1, 0, 0],  label: 'Left' },    // -X
+  top:     { dir: [0, 0, 1],   label: 'Top' },     // +Z
+  bottom:  { dir: [0, 0, -1],  label: 'Bottom' },  // -Z
+  // Iso corners
+  frontTopRight:  { dir: [0.65, 0.65, 0.65], label: 'FRT' },
+  frontTopLeft:   { dir: [-0.65, 0.65, 0.65], label: 'FLT' },
+  backTopRight:   { dir: [0.65, -0.65, 0.65], label: 'BRT' },
+  backTopLeft:    { dir: [-0.65, -0.65, 0.65], label: 'BLT' },
+};
+
+function normalize(v) {
+  const len = Math.sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]) || 1;
+  return [v[0]/len, v[1]/len, v[2]/len];
+}
+
+// Position the ortho camera to look at the board from a given view direction.
+// dir is the direction FROM the target TO the camera.
+function setView(dir, animate) {
+  if (!boardObj || !controls || !camera) return;
+  const box = new THREE.Box3().setFromObject(boardObj);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z) || 1;
+  const n = normalize(dir);
+  const dist = maxDim * 2.2;
+
+  const target = new THREE.Vector3(center.x, center.y, center.z);
+  const pos = new THREE.Vector3(center.x + n[0]*dist,
+                                center.y + n[1]*dist,
+                                center.z + n[2]*dist);
+
+  // Keep the ortho frustum sized to frame the model.
+  const viewHalf = maxDim * 1.7;
+  camera.left = -viewHalf;
+  camera.right = viewHalf;
+  camera.top = viewHalf;
+  camera.bottom = -viewHalf;
+  camera.updateProjectionMatrix();
+
+  // Snap directly (no animation) for reliability.
+  camera.position.copy(pos);
+  controls.target.copy(target);
+  controls.update();
+  renderer.render(scene, camera);
+}
 
 function initViewer(canvas) {
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
@@ -25,12 +80,11 @@ function initViewer(canvas) {
   );
   camera.position.set(1.0, 0.75, 1.2);
 
-  // The board lies flat in the X-Y plane with its front face toward +Z
-  // (KiCad convention). Align the orbit axis with the board normal so the
-  // user can tilt up to a true top-down view of the front (and under for the
-  // back), instead of OrbitControls' default +Y pole which just orbits the
-  // board's thin edge.
-  camera.up.set(0, 0, 1);
+  // NOTE: do NOT override camera.up here. The GLB exports the board flat in
+  // the X-Z plane with its thickness/normal along Y (KiCad Z-up maps to
+  // glTF Y-up). OrbitControls' default +Y up is therefore already correct —
+  // forcing a different up (as a previous change did) orbits around an axis
+  // that lies IN the board plane and breaks rotation.
 
   controls = new OrbitControls(camera, canvas);
   controls.enableDamping = true;
@@ -107,6 +161,7 @@ function show3D(url) {
   new GLTFLoader().load(
     url,
     (gltf) => {
+      boardObj = gltf.scene;
       scene.add(gltf.scene);
       fitCamera(gltf.scene);
     },
@@ -118,6 +173,12 @@ function show3D(url) {
     }
   );
 }
+
+// Global API for the view cube in the page.
+window.__setView = function (key) {
+  if (VIEWS[key]) setView(VIEWS[key].dir);
+};
+window.__viewKeys = Object.keys(VIEWS);
 
 // Called from the page when the 3D canvas is toggled visible again after
 // switching to a 2D layer view — re-sync the renderer size to the container.
