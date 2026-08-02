@@ -185,61 +185,19 @@ def _index_html() -> str:
     border-radius: var(--radius); padding: 8px; overflow: hidden;
   }}
   #preview img {{ max-width: 100%; max-height: 560px; }}
-  #pcb3d {{ width: 100%; height: 100%; display: block; }}
-  .viewbar {{ display: flex; gap: 6px; margin-bottom: 10px; }}
-  .vbtn {{
-    padding: 7px 14px; border: 1px solid var(--border); border-radius: 7px;
-    background: var(--panel-2); color: var(--muted); font-size: 13px; font-weight: 600;
-    cursor: pointer; font-family: inherit;
-  }}
-  .vbtn:hover {{ color: var(--text); border-color: #3d4553; }}
-  .vbtn.active {{
-    background: var(--accent); color: #fff; border-color: var(--accent);
-  }}
-  .svgwrap {{
-    width: 100%; height: 100%; overflow: auto;
-    display: grid; place-items: center; cursor: grab;
-    position: absolute; inset: 0;
-  }}
-  .svgwrap.dragging {{ cursor: grabbing; }}
-  .svgwrap img {{
-    transform-origin: 0 0;
-    user-select: none; -webkit-user-drag: none;
-    max-width: none; max-height: none;
-  }}
-  .viewbar .vbtn:disabled {{ opacity: .4; cursor: not-allowed; }}
-  #viewcube {{
-    position: absolute; top: 14px; right: 14px; z-index: 5;
-    display: none;
-    background: var(--panel-2); border: 1px solid var(--border);
-    border-radius: 8px; padding: 8px;
-    box-shadow: 0 4px 16px rgba(0,0,0,.4);
-  }}
-  #viewcube.active {{ display: block; }}
-  .cube-grid {{
-    display: grid; grid-template-columns: repeat(3, 44px);
-    gap: 2px;
-  }}
-  .cube-face {{
-    width: 44px; height: 34px; border: none; border-radius: 4px;
-    background: transparent; color: var(--muted);
-    font-size: 10px; font-weight: 600; cursor: pointer; font-family: inherit;
-    display: grid; place-items: center; transition: background .12s, color .12s;
-  }}
-  .cube-face:hover {{ background: rgba(79,140,255,.18); color: var(--text); }}
-  .cube-face[data-key="front"]  {{ grid-column: 2; grid-row: 2; }}
-  .cube-face[data-key="back"]   {{ grid-column: 2; grid-row: 1; }}
-  .cube-face[data-key="top"]    {{ grid-column: 2; grid-row: 3; }}
-  .cube-face[data-key="right"]  {{ grid-column: 3; grid-row: 2; }}
-  .cube-face[data-key="left"]   {{ grid-column: 1; grid-row: 2; }}
-  .cube-face[data-key="bottom"] {{ grid-column: 1; grid-row: 3; }}
-  .cube-face[data-key="frontTopRight"] {{ grid-column: 3; grid-row: 1; }}
-  .cube-face[data-key="frontTopLeft"]  {{ grid-column: 1; grid-row: 1; }}
-  .cube-face[data-key="backTopRight"]  {{ grid-column: 3; grid-row: 3; }}
-  .cube-face[data-key="backTopLeft"]   {{ grid-column: 1; grid-row: 3; }}
-  .cube-face.primary {{ background: rgba(79,140,255,.25); color: #fff; }}
   #preview .placeholder {{ color: var(--muted); text-align: center; position: absolute; inset: 0; display: grid; place-items: center; }}
   #preview .placeholder svg {{ margin-bottom: 8px; opacity: .5; }}
+  #preview .placeholder img {{ max-width: 96%; max-height: 96%; border-radius: 6px; }}
+  .gerber-link {{
+    position: absolute; bottom: 12px; right: 12px; z-index: 3;
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 8px 14px; border-radius: 8px;
+    background: var(--accent); color: #fff; text-decoration: none;
+    font-size: 13px; font-weight: 600; font-family: inherit;
+    box-shadow: 0 4px 14px rgba(0,0,0,.35);
+    transition: opacity .12s, transform .12s;
+  }}
+  .gerber-link:hover {{ opacity: .92; transform: translateY(-1px); }}
   #status {{
     margin-top: 14px; font-size: 13px; line-height: 1.6;
     display: none; border-radius: 7px; padding: 10px 12px;
@@ -347,19 +305,7 @@ def _index_html() -> str:
   <div>
     <div class="card">
       <h2>Preview</h2>
-      <div class="viewbar">
-        <button type="button" class="vbtn" id="vbtn_front" onclick="showView('front')">Front</button>
-        <button type="button" class="vbtn" id="vbtn_back" onclick="showView('back')">Back</button>
-        <button type="button" class="vbtn" id="vbtn_3d" onclick="showView('3d')">3D</button>
-      </div>
       <div id="preview">
-        <canvas id="pcb3d" style="width:100%;height:100%;display:none"></canvas>
-        <div class="svgwrap" id="svgwrap" style="display:none">
-          <img id="pcbsvg" alt="PCB layer view" draggable="false">
-        </div>
-        <div class="viewcube-wrap" id="viewcube">
-          <div class="cube-grid" id="cubegrid"></div>
-        </div>
         <div class="placeholder" id="placeholder">
           <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <rect x="3" y="5" width="18" height="14" rx="2"/>
@@ -367,6 +313,14 @@ def _index_html() -> str:
           </svg><br>
           Generate a board to see a live PCB preview here.
         </div>
+        <a id="gerberlink" class="gerber-link" target="_blank" rel="noopener" style="display:none">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+            <path d="M15 3h6v6"/>
+            <path d="M10 14L21 3"/>
+          </svg>
+          Open full Gerber viewer
+        </a>
       </div>
       <div class="meta">
         <span><span class="dot green"></span>Generated locally on your tailnet</span>
@@ -380,161 +334,8 @@ def _index_html() -> str:
   matrix JSON, and firmware from a KLE layout. No files leave your network.
 </footer>
 
-<script type="importmap">
-{{
-  "imports": {{
-    "three": "/static/three.module.js",
-    "three/addons/": "/static/"
-  }}
-}}
-</script>
-<script type="module" src="/static/viewer.js"></script>
 <script>
   const example = {example};
-  let viewData = {{ front: null, back: null, d3d: null }};
-
-  // --- 2D (front/back) SVG viewer: pan + zoom only, no rotate ---
-  let svgScale = 1;
-  let svgPanX = 0;
-  let svgPanY = 0;
-  let drag = null;
-
-  function fitSvg() {{
-    const wrap = document.getElementById('svgwrap');
-    const img = document.getElementById('pcbsvg');
-    if (!img.naturalWidth || !wrap.clientWidth) return;
-    const scale = Math.min(
-      wrap.clientWidth / img.naturalWidth,
-      wrap.clientHeight / img.naturalHeight
-    ) * 0.95;
-    svgScale = scale;
-    svgPanX = 0;
-    svgPanY = 0;
-    applySvgTransform();
-  }}
-
-  function applySvgTransform() {{
-    const img = document.getElementById('pcbsvg');
-    const wrap = document.getElementById('svgwrap');
-    const cx = wrap.clientWidth / 2;
-    const cy = wrap.clientHeight / 2;
-    // Center the image then apply pan, scaled.
-    img.style.transform =
-      'translate(' + (svgPanX) + 'px,' + (svgPanY) + 'px) ' +
-      'translate(' + cx + 'px,' + cy + 'px) ' +
-      'scale(' + svgScale + ') translate(' + (-img.naturalWidth/2) + 'px,' + (-img.naturalHeight/2) + 'px)';
-  }}
-
-  function setup2DPanZoom() {{
-    const wrap = document.getElementById('svgwrap');
-    const img = document.getElementById('pcbsvg');
-    img.addEventListener('load', fitSvg);
-    wrap.addEventListener('wheel', function (e) {{
-      e.preventDefault();
-      const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
-      svgScale = Math.max(0.05, Math.min(50, svgScale * factor));
-      applySvgTransform();
-    }}, {{ passive: false }});
-    wrap.addEventListener('mousedown', function (e) {{
-      drag = {{ x: e.clientX, y: e.clientY, px: svgPanX, py: svgPanY }};
-      wrap.classList.add('dragging');
-      e.preventDefault();
-    }});
-    window.addEventListener('mousemove', function (e) {{
-      if (!drag) return;
-      svgPanX = drag.px + (e.clientX - drag.x);
-      svgPanY = drag.py + (e.clientY - drag.y);
-      applySvgTransform();
-    }});
-    window.addEventListener('mouseup', function () {{
-      drag = null;
-      wrap.classList.remove('dragging');
-    }});
-    wrap.addEventListener('dblclick', fitSvg);
-  }}
-
-  function showView(which) {{
-    const front = viewData.front, back = viewData.back, d3d = viewData.d3d;
-    const placeholder = document.getElementById('placeholder');
-    const canvas = document.getElementById('pcb3d');
-    const wrap = document.getElementById('svgwrap');
-    const img = document.getElementById('pcbsvg');
-    // Update active button
-    ['front','back','3d'].forEach(function (k) {{
-      document.getElementById('vbtn_' + k).classList.toggle('active', k === which);
-    }});
-    if (which === '3d') {{
-      wrap.style.display = 'none';
-      placeholder.style.display = 'none';
-      canvas.style.display = 'block';
-      if (d3d) {{
-        // force re-render after switching container display
-        setCubeVisible(true);
-        if (window.__setViewerSize) window.__setViewerSize();
-      }} else {{
-        canvas.style.display = 'none';
-        setCubeVisible(false);
-        placeholder.style.display = 'grid';
-        placeholder.innerHTML = '<div class="errorbox">3D preview unavailable.</div>';
-      }}
-      return;
-    }}
-    // 2D layer
-    const url = which === 'front' ? front : back;
-    canvas.style.display = 'none';
-    placeholder.style.display = 'none';
-    wrap.style.display = 'grid';
-    setCubeVisible(false);
-    if (img.src !== url) {{
-      img.src = url || '';
-    }}
-    if (!url) {{
-      wrap.style.display = 'none';
-      placeholder.style.display = 'grid';
-      placeholder.innerHTML = '<div class="errorbox">' + (which === 'front' ? 'Front' : 'Back') + ' layer view unavailable.</div>';
-    }}
-    if (img.complete && img.naturalWidth) fitSvg();
-  }}
-
-  // Build the 3D view cube (Front/Back/Left/Right/Top/Bottom + iso corners).
-  // Shown only while the 3D viewer is active.
-  const cubeDefs = [
-    {{ key: 'back', label: 'B' }},
-    {{ key: 'frontTopLeft', label: 'FLT' }},
-    {{ key: 'frontTopRight', label: 'FRT' }},
-    {{ key: 'left', label: 'L' }},
-    {{ key: 'front', label: 'F', primary: true }},
-    {{ key: 'right', label: 'R' }},
-    {{ key: 'backTopLeft', label: 'BLT' }},
-    {{ key: 'top', label: 'T' }},
-    {{ key: 'backTopRight', label: 'BRT' }},
-  ];
-  function buildViewCube() {{
-    const grid = document.getElementById('cubegrid');
-    grid.innerHTML = '';
-    cubeDefs.forEach(function (d) {{
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'cube-face' + (d.primary ? ' primary' : '');
-      b.dataset.key = d.key;
-      b.textContent = d.label;
-      b.title = d.key;
-      b.onclick = function () {{
-        if (window.__setView) window.__setView(d.key);
-      }};
-      grid.appendChild(b);
-    }});
-  }}
-  function setCubeVisible(vis) {{
-    document.getElementById('viewcube').classList.toggle('active', vis);
-  }}
-  buildViewCube();
- 
-  function loadExample() {{
-    document.getElementById('kle').value = JSON.stringify(example, null, 2);
-    document.getElementById('kle').focus();
-    setStatus('Example layout loaded. Click Generate.', 'ok');
-  }}
 
   function setStatus(msg, kind) {{
     const st = document.getElementById('status');
@@ -542,18 +343,25 @@ def _index_html() -> str:
     st.innerHTML = msg;
   }}
 
+  function loadExample() {{
+    document.getElementById('kle').value = JSON.stringify(example, null, 2);
+    document.getElementById('kle').focus();
+    setStatus('Example layout loaded. Click Generate.', 'ok');
+  }}
+
+  function esc(s) {{
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }}
+
   async function generate() {{
     const btn = document.getElementById('genbtn');
-    const preview = document.getElementById('preview');
-    const canvas = document.getElementById('pcb3d');
     const placeholder = document.getElementById('placeholder');
+    const link = document.getElementById('gerberlink');
     btn.disabled = true;
     setStatus('<span class="spinner"></span>Generating board…', 'loading');
-    // Keep the canvas + placeholder elements alive (show3D needs them later).
-    // Show a spinner overlay without clobbering the DOM.
     placeholder.style.display = 'grid';
     placeholder.innerHTML = '<span class="spinner"></span>';
-    canvas.style.display = 'none';
+    link.style.display = 'none';
 
     const body = {{
       kle: document.getElementById('kle').value,
@@ -587,24 +395,19 @@ def _index_html() -> str:
         data.matrix_lines + ' matrix lines. &nbsp;<a href="' + data.download + '">Download ZIP</a>',
         'ok'
       );
-      viewData = {{
-        front: data.viewer_front || null,
-        back: data.viewer_back || null,
-        d3d: data.viewer3d || null
-      }};
-      // Enable only the buttons for views that actually rendered.
-      ['front','back','3d'].forEach(function (k) {{
-        document.getElementById('vbtn_' + k).disabled = !viewData[k === '3d' ? 'd3d' : k];
-      }});
-      if (viewData.d3d) {{
-        window.show3D(viewData.d3d);
-        showView('3d');
-      }} else if (viewData.front) {{
-        showView('front');
-      }} else {{
-        // fallback: flat SVG thumbnail if no viewers available
+      // Preview: show the front copper image as a static picture.
+      const frontUrl = data.viewer_front || data.thumbnail;
+      if (frontUrl) {{
+        placeholder.innerHTML = '<img src="' + frontUrl + '" alt="PCB front preview">';
         placeholder.style.display = 'grid';
-        placeholder.innerHTML = '<img src="' + data.thumbnail + '" alt="PCB preview">';
+      }} else {{
+        placeholder.innerHTML = '<div class="errorbox">Preview unavailable.</div>';
+        placeholder.style.display = 'grid';
+      }}
+      // Link to the full GerberViewer in a new tab.
+      if (data.gerbers) {{
+        link.href = '/static/gerberviewer/index.html?gerber=' + encodeURIComponent(data.gerbers);
+        link.style.display = 'inline-flex';
       }}
     }} catch (e) {{
       setStatus('', '');
@@ -615,12 +418,6 @@ def _index_html() -> str:
     }}
   }}
 
-  function esc(s) {{
-    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }}
-
-  // Wire up the 2D layer pan/zoom handlers once.
-  setup2DPanZoom();
 </script>
 </body>
 </html>"""
@@ -702,6 +499,16 @@ async def generate(payload: dict):
     back_ok = _export_layer_svg(pcb_path, "B.Cu,Edge.Cuts", True,
                                 os.path.join(workdir, "back.svg"))
 
+    # GerberViewer: export a fabrication Gerber + drill set and cache it as a
+    # zip so the preview panel (and the download) can serve it.
+    gerber_dir = os.path.join(workdir, "gerbers")
+    os.makedirs(gerber_dir, exist_ok=True)
+    gfiles = _export_gerbers(pcb_path, gerber_dir)
+    gerbers_ok = bool(gfiles)
+    if gerbers_ok:
+        with open(os.path.join(workdir, "gerbers.zip"), "wb") as f:
+            f.write(_zip_gerbers(gerber_dir, gfiles))
+
     kb = gen.keyboard
     return {
         "keyboard": kb.name,
@@ -712,6 +519,7 @@ async def generate(payload: dict):
         "viewer3d": f"/glb?d={workdir}" if glb_ok else None,
         "viewer_front": f"/layer?d={workdir}&n=front" if front_ok else None,
         "viewer_back": f"/layer?d={workdir}&n=back" if back_ok else None,
+        "gerbers": f"/gerbers?d={workdir}" if gerbers_ok else None,
         "zip_bytes": len(_build_zip(workdir)),
     }
 
@@ -730,10 +538,17 @@ def _build_zip(workdir):
                 arc = os.path.relpath(full, outname)
                 zf.write(full, arc)
         for extra in ("matrix.json", "preview.svg", "board.glb",
-                      "front.svg", "back.svg", "layout.json"):
+                      "front.svg", "back.svg", "layout.json", "gerbers.zip"):
             p = os.path.join(workdir, extra)
             if os.path.exists(p):
                 zf.write(p, extra)
+        # Individual gerber/drill files under a gerbers/ subdir (for fab).
+        gdir = os.path.join(workdir, "gerbers")
+        if os.path.isdir(gdir):
+            for fn in sorted(os.listdir(gdir)):
+                p = os.path.join(gdir, fn)
+                if os.path.isfile(p):
+                    zf.write(p, os.path.join("gerbers", fn))
     zipbuf.seek(0)
     return zipbuf.getvalue()
 
@@ -776,6 +591,23 @@ async def layer(d: str, n: str):
         raise HTTPException(404, "layer view not found")
     with open(svg_path) as f:
         return Response(f.read(), media_type="image/svg+xml")
+
+
+@app.get("/gerbers")
+async def gerbers(d: str):
+    """Return a zip of the generated fabrication Gerbers + drill files, for
+    the GerberViewer preview panel. Export happens once at generate time and
+    the zip is cached in the workdir; this just serves it."""
+    zip_path = os.path.join(d, "gerbers.zip")
+    if not os.path.exists(zip_path):
+        raise HTTPException(404, "gerbers not found")
+    with open(zip_path, "rb") as f:
+        data = f.read()
+    return Response(
+        data,
+        media_type="application/zip",
+        headers={"Content-Disposition": f"inline; filename=gerbers.zip"},
+    )
 
 
 def _export_layer_svg(pcb_path, layers, mirror, out_path):
@@ -836,6 +668,64 @@ def _export_glb(pcb_path, out_path):
         return os.path.exists(out_path) and os.path.getsize(out_path) > 0
     except (subprocess.SubprocessError, OSError):
         return False
+
+
+# Gerber layers that make up a real fabrication set, in the order GerberViewer
+# likes. F/B copper, silkscreen, soldermask, solder paste, and the board
+# outline. (Adhes/User/CrtYd/Fab are dropped - junk for a fabrication preview.)
+_GERBER_LAYERS = (
+    "F.Cu,B.Cu,F.SilkS,B.SilkS,F.Mask,B.Mask,F.Paste,B.Paste,Edge.Cuts"
+)
+
+
+def _export_gerbers(pcb_path, out_dir, drill=True):
+    """Export a fabrication Gerber set + Excellon drill files into out_dir.
+
+    Returns the list of generated filenames (or empty on failure). Used to
+    feed GerberViewer, which consumes standard KiCad Gerber/Excellon names
+    (.gtl/.gbl copper, .gto/.gbo silk, .gts/.gbs mask, .gtp/.gbp paste,
+    Edge_Cuts outline, .drl drill).
+    """
+    kicad_cli = shutil.which("kicad-cli")
+    if not kicad_cli:
+        return []
+    try:
+        ger = subprocess.run(
+            [kicad_cli, "pcb", "export", "gerbers", pcb_path,
+             "-o", out_dir, "-l", _GERBER_LAYERS],
+            capture_output=True, text=True, timeout=120,
+        )
+        if ger.returncode != 0:
+            return []
+        if drill:
+            dr = subprocess.run(
+                [kicad_cli, "pcb", "export", "drill", pcb_path,
+                 "-o", out_dir],
+                capture_output=True, text=True, timeout=120,
+            )
+            if dr.returncode != 0:
+                return []
+        # Collect just the gerber/drill files (skip the .gbrjob manifest).
+        files = sorted(
+            f for f in os.listdir(out_dir)
+            if f.endswith((".gtl", ".gbl", ".gto", ".gbo", ".gts", ".gbs",
+                           ".gtp", ".gbp", ".gm1", ".drl"))
+        )
+        return files
+    except (subprocess.SubprocessError, OSError):
+        return []
+
+
+def _zip_gerbers(out_dir, files):
+    """Zip a set of gerber files in out_dir into an in-memory archive."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in files:
+            p = os.path.join(out_dir, f)
+            if os.path.isfile(p):
+                zf.write(p, f)
+    buf.seek(0)
+    return buf.getvalue()
 
 
 if __name__ == "__main__":

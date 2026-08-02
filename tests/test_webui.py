@@ -104,8 +104,48 @@ class TestWebUI(unittest.TestCase):
         # The download must be the complete project, not just the KiCad dir:
         # the viewer/thumbnail outputs are included alongside it.
         for extra in ("matrix.json", "preview.svg", "board.glb",
-                      "front.svg", "back.svg", "layout.json"):
+                      "front.svg", "back.svg", "layout.json",
+                      "gerbers.zip"):
             self.assertIn(extra, names)
+        # Individual gerber files ship under gerbers/ for fabrication.
+        self.assertTrue(any(n.startswith("gerbers/") for n in names))
+
+    def test_generate_produces_gerbers(self):
+        # When kicad-cli is available, the generate response must include a
+        # gerbers URL, the /gerbers endpoint serves a zip, and the bundled
+        # GerberViewer asset is reachable for the embedded preview.
+        payload = {
+            "kle": _kle_str(),
+            "controller": "rp2040",
+            "key_footprint": "cherry_mx",
+            "diode_footprint": "0805",
+            "key_pitch": 19.05,
+            "edge_margin": 5.0,
+            "do_routing": True,
+            "edge_cuts": True,
+            "firmware_type": "both",
+        }
+        data = self.client.post("/generate", json=payload).json()
+        self.assertIn("gerbers", data)
+        if data["gerbers"] is not None:
+            d = data["download"].split("d=")[1]
+            gr = self.client.get(f"/gerbers?d={d}")
+            self.assertEqual(gr.status_code, 200)
+            self.assertEqual(gr.headers["content-type"], "application/zip")
+            self.assertGreater(len(gr.content), 100)
+            import io
+            import zipfile
+            zf = zipfile.ZipFile(io.BytesIO(gr.content))
+            names = zf.namelist()
+            # Must contain both copper layers + a drill file for a real preview.
+            self.assertTrue(any(n.endswith(".gtl") for n in names), names)
+            self.assertTrue(any(n.endswith(".gbl") for n in names), names)
+            self.assertTrue(any(n.endswith(".drl") for n in names), names)
+        # The GerberViewer bundle is hosted for the embedded iframe preview.
+        r = self.client.get("/static/gerberviewer/index.html")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("gerberviewer", r.text)
+        self.assertIn("assets/", r.text)
 
     def test_generate_produces_3d_viewer(self):
         # When kicad-cli is available, the generate response must include a
