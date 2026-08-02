@@ -213,6 +213,34 @@ class TestGenerator(unittest.TestCase):
             gen.keyboard.keys = [object() for _ in range(500)]
             gen.assign_duplex_matrix()
 
+    def test_controller_anchor_no_collisions(self):
+        # The resolved controller anchor must not overlap any switch/diode
+        # footprint, for every controller.
+        for controller in ("atmega32u4", "promicro", "rp2040"):
+            gen = self._generate(controller=controller)
+            anchor = gen.controller_anchor_resolved()
+            cols = gen.controller_collisions(anchor)
+            self.assertEqual(cols, [], f"{controller} collides: {cols}")
+            # anchor must sit on the board (positive, within reason)
+            x, y, w, h = anchor
+            self.assertGreaterEqual(x, 0)
+            self.assertGreaterEqual(y, 0)
+
+    def test_controller_collision_detection(self):
+        # Force a colliding anchor and confirm the checker reports it.
+        gen = KLEPCBGenerator(GeneratorOptions())
+        gen.read_kle_json(self.kle_path)
+        gen.assign_duplex_matrix()
+        # Overlap the controller region with the switch matrix area.
+        sx0, sy0, sx1, sy1 = gen._switch_bbox()
+        fake_anchor = (sx0, sy0, sx1 - sx0, 10)  # covers the top switch strip
+        cols = gen.controller_collisions(fake_anchor)
+        self.assertGreater(len(cols), 0)
+        # Every collision is a labeled footprint rectangle.
+        for label, box in cols:
+            self.assertIn(label[0], ("K", "D"))
+            self.assertEqual(len(box), 4)
+
     def test_matrix_file(self):
         mpath = os.path.join(self.tmp, "matrix.json")
         self._generate(matrixfile=mpath)

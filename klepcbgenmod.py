@@ -84,6 +84,19 @@ CONTROLLER_PINS = {
     ],
 }
 
+# Physical footprint footprint size (w, h in mm) of the controller + its
+# support circuit, used to size the board outline around it. These are
+# conservative (slightly larger than the rendered block) so edge cuts always
+# clear the parts.
+CONTROLLER_REGIONS = {
+    "atmega32u4": (50, 48),   # bare TQFP-44 + USB/crystal/reset support block
+    "promicro":   (36, 22),   # Pro Micro module via 2x12 pin header
+    "rp2040":     (56, 24),   # Raspberry Pi Pico module via 2x20 pin header
+}
+
+# Gap (mm) between the switch matrix area and the controller block on the PCB.
+CONTROLLER_GAP = 6.0
+
 
 def controller_lines_available(controller):
     """Return how many duplex matrix lines a controller can drive."""
@@ -255,8 +268,16 @@ class KLEPCBGenerator:
         self.jinja_env = Environment(
             loader=FileSystemLoader([self.project_dir / "templates"]),
             undefined=StrictUndefined,
+            # Strip the blank lines that Jinja block tags ({% for %}, {% if %})
+            # would otherwise emit. The EESchema v4 loader rejects stray blank
+            # lines inside Text Label / $Comp blocks, so control templates that
+            # loop over matrix lines MUST render with no leading/trailing blanks.
+            trim_blocks=True,
+            lstrip_blocks=True,
         )
         self.nets = Nets()
+        self._controller_nudge = 0.0
+        self._controller_anchor = None
 
     def generate_kicadproject(self, infile, outname):
         """Generate the kicad project. Main entry point"""
@@ -445,7 +466,9 @@ class KLEPCBGenerator:
         print("Generating schematic ...")
 
         components = self.place_schematic_components()
-        control_circuit = self.jinja_env.get_template("schematic/controlcircuit.tpl")
+        control_circuit = self.jinja_env.get_template(
+            f"schematic/control_{self.options.controller}.tpl"
+        )
         schematic = self.jinja_env.get_template("schematic/schematic.tpl")
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         comment = (
@@ -457,7 +480,10 @@ class KLEPCBGenerator:
             out_file.write(
                 schematic.render(
                     components=components,
-                    controlcircuit=control_circuit.render(),
+                    controlcircuit=control_circuit.render(
+                        matrix_lines=self.keyboard.matrix_lines,
+                        controller=self.options.controller,
+                    ),
                     title=self.keyboard.name,
                     author=self.keyboard.author,
                     date=now,
@@ -624,6 +650,173 @@ class KLEPCBGenerator:
 
         return components_section, component_count
 
+    def _switch_bbox(self):
+        """Return (min_x, min_y, max_x, max_y) of the switch footprints (half a
+        key pitch around each switch center) in PCB mm."""
+        key_pitch = self.options.key_pitch
+        key_origin_x = -0.5 * key_pitch
+        key_origin_y = -0.5 * key_pitch
+        xs = [key_origin_x + k.x_unit * key_pitch for k in self.keyboard.keys]
+        ys = [key_origin_y + k.y_unit * key_pitch for k in self.keyboard.keys]
+        return (
+            min(xs) - 0.5 * key_pitch,
+            min(ys) - 0.5 * key_pitch,
+            max(xs) + 0.5 * key_pitch,
+            max(ys) + 0.5 * key_pitch,
+        )
+
+    def _shift_control_region(self, control_text, cx, cy):
+        """Translate a rendered control-circuit block so its module bbox center
+        lands on (cx, cy).
+
+        Only module top-level `(at x y)` lines and global `(segment ...)` tracks
+        are shifted. Module-internal geometry (fp_line/pad/fp_text coordinates
+        relative to each module origin) stays untouched, so the block's shape is
+        preserved and only its on-board position changes."""
+        import re as _re
+
+        def _shift_at(m):
+            def _repl(sub):
+                x = float(sub.group(1)) + cx
+                y = float(sub.group(2)) + cy
+                suffix = sub.group(3)
+                return f"(at {x:.6g} {y:.6g}{suffix})"
+            return _re.sub(r"\(at (-?[\d.]+) (-?[\d.]+)([^\n]*)\)", _repl, m.group(0))
+
+        # Match the module header line plus the immediately following (at ...) line.
+        text = _re.sub(
+            r"\(module ([^\n]*\(layer (?:B|F)\.Cu\)[^\n]*\n\s*\(at [^\n]*\))",
+            _shift_at, control_text,
+        )
+
+        def _shift_seg(m):
+            def _repl(sub):
+                return (f"(start {float(sub.group(1)) + cx:.6g} "
+                        f"{float(sub.group(2)) + cy:.6g}) "
+                        f"(end {float(sub.group(3)) + cx:.6g} "
+                        f"{float(sub.group(4)) + cy:.6g})")
+            return _re.sub(
+                r"\(start (-?[\d.]+) (-?[\d.]+)\) \(end (-?[\d.]+) (-?[\d.]+)\)",
+                _repl, m.group(0),
+            )
+
+        return _re.sub(r"\(segment [^\n]*", _shift_seg, text)
+
+    def _control_bbox_center(self, control_text):
+        """Return (cx, cy) = bounding-box center of the control block's module
+        placements in template coordinate space (the (at ...) right after each
+        module header)."""
+        import re as _re
+        xs, ys = [], []
+        for m in _re.finditer(
+            r"\(module [^\n]*\(layer (?:B|F)\.Cu\)[^\n]*\n\s*\(at (-?[\d.]+) (-?[\d.]+)",
+            control_text,
+        ):
+            xs.append(float(m.group(1)))
+            ys.append(float(m.group(2)))
+        if not xs:
+            return 0.0, 0.0
+        return (min(xs) + max(xs)) / 2.0, (min(ys) + max(ys)) / 2.0
+
+    def _key_bboxes(self):
+        """Return a list of (label, x0, y0, x1, y1) footprint rectangles for every
+        switch and diode on the board, in PCB mm. Used to detect controller
+        placement collisions."""
+        key_pitch = self.options.key_pitch
+        key_origin_x = -0.5 * key_pitch
+        key_origin_y = -0.5 * key_pitch
+        s = key_pitch / 19.05
+        diode_offset = [-5.8 * s, 8.89 * s]
+        # Conservative footprint boxes: a key's body is width x height in units;
+        # the diode (0805/0603/SOD-123) is ~3 x 2 mm including its pads.
+        diode_half_w = 1.5 * s
+        diode_half_h = 1.0 * s
+        boxes = []
+        for key in self.keyboard.keys:
+            cx = key_origin_x + key.x_unit * key_pitch
+            cy = key_origin_y + key.y_unit * key_pitch
+            hw = (key.width * key_pitch) / 2.0
+            hh = (key.height * key_pitch) / 2.0
+            boxes.append((f"K{key.num}", cx - hw, cy - hh, cx + hw, cy + hh))
+            dx = cx + diode_offset[0]
+            dy = cy + diode_offset[1]
+            boxes.append((
+                f"D{key.num}", dx - diode_half_w, dy - diode_half_h,
+                dx + diode_half_w, dy + diode_half_h,
+            ))
+        return boxes
+
+    def controller_collisions(self, anchor=None):
+        """Return a list of (label, [x0,y0,x1,y1]) footprints that the controller
+        + support region overlaps. Empty list means the placement is clean.
+
+        anchor is the (x, y, w, h) controller region; defaults to controller_anchor()."""
+        ax, ay, aw, ah = anchor or self.controller_anchor()
+        reg = (ax, ay, ax + aw, ay + ah)
+        collisions = []
+        for label, x0, y0, x1, y1 in self._key_bboxes():
+            # AABB overlap test
+            if not (x1 < reg[0] or x0 > reg[2] or y1 < reg[1] or y0 > reg[3]):
+                collisions.append((label, [x0, y0, x1, y1]))
+        return collisions
+
+    def find_clear_controller_anchor(self):
+        """Return an (x, y, w, h) controller anchor that doesn't collide with any
+        switch or diode footprint.
+
+        Starting from the nominal anchor (below the switch matrix), the controller
+        block is nudged further below the matrix until it clears every footprint.
+        Returns None if a clear spot can't be found (practically impossible given
+        unlimited downward space)."""
+        step = 2.0  # mm to nudge per attempt
+        for _ in range(1000):  # hard ceiling; downward space is unbounded in reality
+            anchor = self.controller_anchor()
+            if not self.controller_collisions(anchor):
+                return anchor
+            # nudge the block further below the switch matrix
+            self._controller_nudge = self._controller_nudge + step
+        return None
+
+    def controller_anchor(self):
+        """Return (x, y, w, h) for the controller + support region on the PCB.
+
+        The block is placed centered on the switch matrix's X extent and below
+        its bottom edge (larger Y), separated by CONTROLLER_GAP. Returning the
+        anchor lets both the layout templates (to position parts) and the edge
+        cuts (to include the block in the outline) agree on placement."""
+        min_x, min_y, max_x, max_y = self._switch_bbox()
+        w, h = CONTROLLER_REGIONS[self.options.controller]
+        cx = (min_x + max_x) / 2.0
+        x = cx - w / 2.0
+        # _controller_nudge (mm) moves the block further below the switch matrix
+        # when auto-collision-finding needs to push it clear of footprints.
+        nudge = getattr(self, "_controller_nudge", 0.0)
+        y = max_y + CONTROLLER_GAP + nudge
+        return x, y, w, h
+
+    def resolve_controller_anchor(self):
+        """Compute and cache a controller anchor with no footprint collisions.
+
+        Nudges the block below the switch matrix until it clears every switch
+        and diode. The resolved anchor is cached so the edge cuts and the layout
+        placement both use the same final position. Returns (x, y, w, h)."""
+        step = 2.0  # mm per nudge attempt
+        for _ in range(1000):
+            anchor = self.controller_anchor()
+            if not self.controller_collisions(anchor):
+                self._controller_anchor = anchor
+                return anchor
+            self._controller_nudge = self._controller_nudge + step
+        # Fall back to the nominal anchor (should never happen).
+        self._controller_anchor = self.controller_anchor()
+        return self._controller_anchor
+
+    def controller_anchor_resolved(self):
+        """Return the collision-free controller anchor, resolving it if needed."""
+        if self._controller_anchor is None:
+            return self.resolve_controller_anchor()
+        return self._controller_anchor
+
     def compute_edge_cuts(self):
         """Compute the board outline (Edge.Cuts) based on the bounding box of
            all keyswitch footprints plus a configurable margin, with optional
@@ -646,18 +839,17 @@ class KLEPCBGenerator:
         key_pitch = self.options.key_pitch
         margin = self.options.edge_margin
         radius = self.options.edge_radius
-        key_origin_x = -0.5 * key_pitch
-        key_origin_y = -0.5 * key_pitch
 
-        # Bounding box of switch centers (switch pad1 is at the key center)
-        xs = [key_origin_x + k.x_unit * key_pitch for k in self.keyboard.keys]
-        ys = [key_origin_y + k.y_unit * key_pitch for k in self.keyboard.keys]
-        # Include half a key pitch of footprint footprint beyond the center so the
-        # margin is measured from the footprint edge, not the center.
-        min_x = min(xs) - 0.5 * key_pitch
-        max_x = max(xs) + 0.5 * key_pitch
-        min_y = min(ys) - 0.5 * key_pitch
-        max_y = max(ys) + 0.5 * key_pitch
+        min_x, min_y, max_x, max_y = self._switch_bbox()
+
+        # Include the controller + support block in the outline so it always
+        # lands on the board, regardless of layout size. Uses the collision-free
+        # (resolved) anchor so the outline clears the controller parts.
+        cx, cy, cw, ch = self.controller_anchor_resolved()
+        min_x = min(min_x, cx)
+        min_y = min(min_y, cy)
+        max_x = max(max_x, cx + cw)
+        max_y = max(max_y, cy + ch)
 
         # Add configurable margin
         x0 = min_x - margin
@@ -728,18 +920,24 @@ class KLEPCBGenerator:
         """Define all the nets for this layout"""
         self.nets.add_net("GND")
         self.nets.add_net("VCC")
-        self.nets.add_net('"Net-(C6-Pad1)"')
-        self.nets.add_net('"Net-(C7-Pad1)"')
-        self.nets.add_net('"Net-(C8-Pad1)"')
-        self.nets.add_net('"Net-(J1-Pad4)"')
-        self.nets.add_net('"Net-(J1-Pad3)"')
-        self.nets.add_net('"Net-(J1-Pad2)"')
-        self.nets.add_net('"Net-(R1-Pad1)"')
-        self.nets.add_net('"Net-(R2-Pad1)"')
-        self.nets.add_net('"Net-(R3-Pad1)"')
-        self.nets.add_net('"Net-(R4-Pad2)"')
-        self.nets.add_net('"Net-(U1-Pad42)"')
-        self.nets.add_net('/Reset')
+
+        # The bare ATmega32U4 carries its own support circuit (USB, crystal,
+        # reset, decoupling), so those nets only exist for that controller.
+        # The Pro Micro and RP2040 are pre-built modules: we only wire matrix
+        # lines and power/reset to their headers.
+        if self.options.controller == "atmega32u4":
+            self.nets.add_net('"Net-(C6-Pad1)"')
+            self.nets.add_net('"Net-(C7-Pad1)"')
+            self.nets.add_net('"Net-(C8-Pad1)"')
+            self.nets.add_net('"Net-(J1-Pad4)"')
+            self.nets.add_net('"Net-(J1-Pad3)"')
+            self.nets.add_net('"Net-(J1-Pad2)"')
+            self.nets.add_net('"Net-(R1-Pad1)"')
+            self.nets.add_net('"Net-(R2-Pad1)"')
+            self.nets.add_net('"Net-(R3-Pad1)"')
+            self.nets.add_net('"Net-(R4-Pad2)"')
+            self.nets.add_net('"Net-(U1-Pad42)"')
+            self.nets.add_net('/Reset')
 
         matrix_tpl = self.jinja_env.get_template("layout/matrixnetname.tpl")
         # Declare one net per duplex matrix line, since the control circuit
@@ -797,7 +995,21 @@ class KLEPCBGenerator:
         edge_cuts = self.compute_edge_cuts()
 
         layout = self.jinja_env.get_template("layout/layout.tpl")
-        controlcircuit = self.jinja_env.get_template("layout/controlcircuit.tpl")
+        controlcircuit = self.jinja_env.get_template(
+            f"layout/control_{self.options.controller}.tpl"
+        )
+        control_text = controlcircuit.render(nets=self.nets, startnet=0,
+                                              matrix_lines=self.keyboard.matrix_lines)
+
+        # Position the control block: center its rendered bbox on the resolved
+        # (collision-free) anchor.
+        cx, cy = self._control_bbox_center(control_text)
+        ax, ay, _w, _h = self.controller_anchor_resolved()
+        # Anchor (ax, ay) is the top-left of the controller region; center it.
+        ax_c = ax + _w / 2.0
+        ay_c = ay + _h / 2.0
+        control_text = self._shift_control_region(control_text, ax_c - cx, ay_c - cy)
+
         layout_output_file_path = outname + "/" + os.path.basename(os.path.normpath(outname)) + ".kicad_pcb"
         with open(layout_output_file_path, "w+", newline="\n", encoding="utf-8") as out_file:
             out_file.write(
@@ -807,7 +1019,7 @@ class KLEPCBGenerator:
                     nets=nets,
                     numnets=self.nets.number_of_nets(),
                     edgecuts=edge_cuts,
-                    controlcircuit=controlcircuit.render(nets=self.nets, startnet=0),
+                    controlcircuit=control_text,
                 )
             )
 
