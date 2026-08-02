@@ -694,17 +694,19 @@ class KLEPCBGenerator:
 
         lines = []
         # Walk the outline clockwise from the bottom-left straight edge start.
-        # Bottom edge (y0) from x0+r to x1-r, then corner to right edge, etc.
+        # Each corner arc is centered INSET by r from the box corner so the arc
+        # cuts the sharp corner inward (proper rounding) instead of bulging
+        # outward past the edge.
         outline = []
         outline.append((x0 + r, y0))                       # bottom-left inner
         outline.append((x1 - r, y0))                       # bottom-right inner
-        outline += corner_points(x1, y0, -90, 0)           # bottom-right corner
+        outline += corner_points(x1 - r, y0 + r, -90, 0)   # bottom-right corner
         outline.append((x1, y1 - r))                       # right-top inner
-        outline += corner_points(x1, y1, 0, 90)            # top-right corner
+        outline += corner_points(x1 - r, y1 - r, 0, 90)    # top-right corner
         outline.append((x0 + r, y1))                       # top-left inner
-        outline += corner_points(x0, y1, 90, 180)          # top-left corner
+        outline += corner_points(x0 + r, y1 - r, 90, 180)  # top-left corner
         outline.append((x0, y0 + r))                       # left-bottom inner
-        outline += corner_points(x0, y0, 180, 270)         # bottom-left corner
+        outline += corner_points(x0 + r, y0 + r, 180, 270) # bottom-left corner
 
         # Emit line segments connecting consecutive outline points.
         for i in range(len(outline) - 1):
