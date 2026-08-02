@@ -112,4 +112,16 @@ function show3D(url) {
   );
 }
 
+// Called from the page when the 3D canvas is toggled visible again after
+// switching to a 2D layer view — re-sync the renderer size to the container.
+function setViewerSize() {
+  if (!renderer) return;
+  const preview = document.getElementById('preview');
+  const canvas = document.getElementById('pcb3d');
+  const w = preview.clientWidth || 600;
+  const h = preview.clientHeight || 460;
+  renderer.setSize(w, h, false);
+}
+window.__setViewerSize = setViewerSize;
+
 window.show3D = show3D;

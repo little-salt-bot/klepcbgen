@@ -186,6 +186,28 @@ def _index_html() -> str:
   }}
   #preview img {{ max-width: 100%; max-height: 560px; }}
   #pcb3d {{ width: 100%; height: 100%; display: block; }}
+  .viewbar {{ display: flex; gap: 6px; margin-bottom: 10px; }}
+  .vbtn {{
+    padding: 7px 14px; border: 1px solid var(--border); border-radius: 7px;
+    background: var(--panel-2); color: var(--muted); font-size: 13px; font-weight: 600;
+    cursor: pointer; font-family: inherit;
+  }}
+  .vbtn:hover {{ color: var(--text); border-color: #3d4553; }}
+  .vbtn.active {{
+    background: var(--accent); color: #fff; border-color: var(--accent);
+  }}
+  .svgwrap {{
+    width: 100%; height: 100%; overflow: auto;
+    display: grid; place-items: center; cursor: grab;
+    position: absolute; inset: 0;
+  }}
+  .svgwrap.dragging {{ cursor: grabbing; }}
+  .svgwrap img {{
+    transform-origin: 0 0;
+    user-select: none; -webkit-user-drag: none;
+    max-width: none; max-height: none;
+  }}
+  .viewbar .vbtn:disabled {{ opacity: .4; cursor: not-allowed; }}
   #preview .placeholder {{ color: var(--muted); text-align: center; position: absolute; inset: 0; display: grid; place-items: center; }}
   #preview .placeholder svg {{ margin-bottom: 8px; opacity: .5; }}
   #status {{
@@ -295,14 +317,22 @@ def _index_html() -> str:
   <div>
     <div class="card">
       <h2>Preview</h2>
+      <div class="viewbar">
+        <button type="button" class="vbtn" id="vbtn_front" onclick="showView('front')">Front</button>
+        <button type="button" class="vbtn" id="vbtn_back" onclick="showView('back')">Back</button>
+        <button type="button" class="vbtn" id="vbtn_3d" onclick="showView('3d')">3D</button>
+      </div>
       <div id="preview">
         <canvas id="pcb3d" style="width:100%;height:100%;display:none"></canvas>
+        <div class="svgwrap" id="svgwrap" style="display:none">
+          <img id="pcbsvg" alt="PCB layer view" draggable="false">
+        </div>
         <div class="placeholder" id="placeholder">
           <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <rect x="3" y="5" width="18" height="14" rx="2"/>
             <path d="M3 9h18M7 5v14M17 5v14"/>
           </svg><br>
-          Generate a board to see a live 3D PCB preview here.
+          Generate a board to see a live PCB preview here.
         </div>
       </div>
       <div class="meta">
@@ -328,6 +358,107 @@ def _index_html() -> str:
 <script type="module" src="/static/viewer.js"></script>
 <script>
   const example = {example};
+  let viewData = {{ front: null, back: null, d3d: null }};
+
+  // --- 2D (front/back) SVG viewer: pan + zoom only, no rotate ---
+  let svgScale = 1;
+  let svgPanX = 0;
+  let svgPanY = 0;
+  let drag = null;
+
+  function fitSvg() {{
+    const wrap = document.getElementById('svgwrap');
+    const img = document.getElementById('pcbsvg');
+    if (!img.naturalWidth || !wrap.clientWidth) return;
+    const scale = Math.min(
+      wrap.clientWidth / img.naturalWidth,
+      wrap.clientHeight / img.naturalHeight
+    ) * 0.95;
+    svgScale = scale;
+    svgPanX = 0;
+    svgPanY = 0;
+    applySvgTransform();
+  }}
+
+  function applySvgTransform() {{
+    const img = document.getElementById('pcbsvg');
+    const wrap = document.getElementById('svgwrap');
+    const cx = wrap.clientWidth / 2;
+    const cy = wrap.clientHeight / 2;
+    // Center the image then apply pan, scaled.
+    img.style.transform =
+      'translate(' + (svgPanX) + 'px,' + (svgPanY) + 'px) ' +
+      'translate(' + cx + 'px,' + cy + 'px) ' +
+      'scale(' + svgScale + ') translate(' + (-img.naturalWidth/2) + 'px,' + (-img.naturalHeight/2) + 'px)';
+  }}
+
+  function setup2DPanZoom() {{
+    const wrap = document.getElementById('svgwrap');
+    const img = document.getElementById('pcbsvg');
+    img.addEventListener('load', fitSvg);
+    wrap.addEventListener('wheel', function (e) {{
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+      svgScale = Math.max(0.05, Math.min(50, svgScale * factor));
+      applySvgTransform();
+    }}, {{ passive: false }});
+    wrap.addEventListener('mousedown', function (e) {{
+      drag = {{ x: e.clientX, y: e.clientY, px: svgPanX, py: svgPanY }};
+      wrap.classList.add('dragging');
+      e.preventDefault();
+    }});
+    window.addEventListener('mousemove', function (e) {{
+      if (!drag) return;
+      svgPanX = drag.px + (e.clientX - drag.x);
+      svgPanY = drag.py + (e.clientY - drag.y);
+      applySvgTransform();
+    }});
+    window.addEventListener('mouseup', function () {{
+      drag = null;
+      wrap.classList.remove('dragging');
+    }});
+    wrap.addEventListener('dblclick', fitSvg);
+  }}
+
+  function showView(which) {{
+    const front = viewData.front, back = viewData.back, d3d = viewData.d3d;
+    const placeholder = document.getElementById('placeholder');
+    const canvas = document.getElementById('pcb3d');
+    const wrap = document.getElementById('svgwrap');
+    const img = document.getElementById('pcbsvg');
+    // Update active button
+    ['front','back','3d'].forEach(function (k) {{
+      document.getElementById('vbtn_' + k).classList.toggle('active', k === which);
+    }});
+    if (which === '3d') {{
+      wrap.style.display = 'none';
+      placeholder.style.display = 'none';
+      canvas.style.display = 'block';
+      if (d3d) {{
+        // force re-render after switching container display
+        if (window.__setViewerSize) window.__setViewerSize();
+      }} else {{
+        canvas.style.display = 'none';
+        placeholder.style.display = 'grid';
+        placeholder.innerHTML = '<div class="errorbox">3D preview unavailable.</div>';
+      }}
+      return;
+    }}
+    // 2D layer
+    const url = which === 'front' ? front : back;
+    canvas.style.display = 'none';
+    placeholder.style.display = 'none';
+    wrap.style.display = 'grid';
+    if (img.src !== url) {{
+      img.src = url || '';
+    }}
+    if (!url) {{
+      wrap.style.display = 'none';
+      placeholder.style.display = 'grid';
+      placeholder.innerHTML = '<div class="errorbox">' + (which === 'front' ? 'Front' : 'Back') + ' layer view unavailable.</div>';
+    }}
+    if (img.complete && img.naturalWidth) fitSvg();
+  }}
 
   function loadExample() {{
     document.getElementById('kle').value = JSON.stringify(example, null, 2);
@@ -386,10 +517,22 @@ def _index_html() -> str:
         data.matrix_lines + ' matrix lines. &nbsp;<a href="' + data.download + '">Download ZIP</a>',
         'ok'
       );
-      if (data.viewer3d) {{
-        window.show3D(data.viewer3d);
+      viewData = {{
+        front: data.viewer_front || null,
+        back: data.viewer_back || null,
+        d3d: data.viewer3d || null
+      }};
+      // Enable only the buttons for views that actually rendered.
+      ['front','back','3d'].forEach(function (k) {{
+        document.getElementById('vbtn_' + k).disabled = !viewData[k === '3d' ? 'd3d' : k];
+      }});
+      if (viewData.d3d) {{
+        window.show3D(viewData.d3d);
+        showView('3d');
+      }} else if (viewData.front) {{
+        showView('front');
       }} else {{
-        // fallback: flat SVG thumbnail if 3D export unavailable
+        // fallback: flat SVG thumbnail if no viewers available
         placeholder.style.display = 'grid';
         placeholder.innerHTML = '<img src="' + data.thumbnail + '" alt="PCB preview">';
       }}
@@ -405,6 +548,9 @@ def _index_html() -> str:
   function esc(s) {{
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }}
+
+  // Wire up the 2D layer pan/zoom handlers once.
+  setup2DPanZoom();
 </script>
 </body>
 </html>"""
@@ -479,6 +625,14 @@ async def generate(payload: dict):
     glb_path = os.path.join(workdir, glb_name)
     glb_ok = _export_glb(pcb_path, glb_path)
 
+    # 2D copper viewers: render front and back copper layers as SVGs via
+    # kicad-cli. Back layer is mirrored so it reads correctly from the rear.
+    front_ok = _export_layer_svg(pcb_path, "F.Cu,Edge.Cuts", False,
+                                 os.path.join(workdir, "front.svg"))
+    back_ok = _export_layer_svg(pcb_path, "B.Cu,Edge.Cuts", True,
+                                os.path.join(workdir, "back.svg"))
+
+
     zipbuf = io.BytesIO()
     with zipfile.ZipFile(zipbuf, "w", zipfile.ZIP_DEFLATED) as zf:
         for root, _dirs, files in os.walk(outname):
@@ -499,6 +653,8 @@ async def generate(payload: dict):
         "download": f"/download?d={workdir}",
         "thumbnail": f"/thumb?d={workdir}",
         "viewer3d": f"/glb?d={workdir}" if glb_ok else None,
+        "viewer_front": f"/layer?d={workdir}&n=front" if front_ok else None,
+        "viewer_back": f"/layer?d={workdir}&n=back" if back_ok else None,
         "zip_bytes": len(zip_data),
     }
 
@@ -544,6 +700,45 @@ async def glb(d: str):
             media_type="model/gltf-binary",
             headers={"Content-Disposition": "inline; filename=board.glb"},
         )
+
+
+@app.get("/layer")
+async def layer(d: str, n: str):
+    svg_path = os.path.join(d, f"{n}.svg")
+    if n not in ("front", "back") or not os.path.exists(svg_path):
+        raise HTTPException(404, "layer view not found")
+    with open(svg_path) as f:
+        return Response(f.read(), media_type="image/svg+xml")
+
+
+def _export_layer_svg(pcb_path, layers, mirror, out_path):
+    """Render a single copper layer (front or back) to an SVG via kicad-cli.
+
+    The output is a clean board-only render (no drawing sheet) showing the
+    copper traces/pads on the requested layer plus the Edge.Cuts outline.
+    The back layer is mirrored so text/traces read correctly when viewed
+    from the rear of the board.
+    """
+    kicad_cli = shutil.which("kicad-cli")
+    if not kicad_cli:
+        return False
+    try:
+        cmd = [
+            kicad_cli, "pcb", "export", "svg", pcb_path, "-o", out_path,
+            "--layers", layers,
+            "--exclude-drawing-sheet",
+            "--fit-page-to-board",
+            "--page-size-mode", "2",
+        ]
+        if mirror:
+            cmd.append("--mirror")
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=120
+        )
+        return os.path.exists(out_path) and os.path.getsize(out_path) > 0
+    except (subprocess.SubprocessError, OSError):
+        return False
+
 
 
 def _export_glb(pcb_path, out_path):
