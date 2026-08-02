@@ -25,6 +25,13 @@ function initViewer(canvas) {
   );
   camera.position.set(1.0, 0.75, 1.2);
 
+  // The board lies flat in the X-Y plane with its front face toward +Z
+  // (KiCad convention). Align the orbit axis with the board normal so the
+  // user can tilt up to a true top-down view of the front (and under for the
+  // back), instead of OrbitControls' default +Y pole which just orbits the
+  // board's thin edge.
+  camera.up.set(0, 0, 1);
+
   controls = new OrbitControls(camera, canvas);
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
