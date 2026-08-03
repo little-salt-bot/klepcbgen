@@ -204,6 +204,62 @@ class TestGenerator(unittest.TestCase):
         self.assertIn("GP0", fw_cfg)
         self.assertIn("GP13", fw_cfg)
 
+    def test_stabilizer_footprints_for_wide_keys(self):
+        """Keys >=2u wide get a stabilizer mounting-hole footprint on the PCB,
+        positioned at the plate's stabilizer cutout centers (exact alignment)."""
+        gen = self._generate()
+        pcb = open(os.path.join(self.workdir, "out.kicad_pcb")).read()
+
+        # Count stabilizer footprints placed on the board.
+        stabs = re.findall(
+            r"^  \(module MountingHole:MountingHole_3\.5mm",
+            pcb, re.M,
+        )
+        # JB82 has 4 keys >=2u (2.0, 2.25x2, 6.25) -> 8 stabilizer holes (2 each).
+        self.assertEqual(len(stabs), 8)
+
+        # Extract the stabilizer positions the PCB uses.
+        pcb_stab_pts = set(
+            (round(float(x), 3), round(float(y), 3))
+            for x, y in re.findall(
+                r"^  \(module MountingHole:MountingHole_3\.5mm[^\n]*\n\s*\(at ([\d.\-]+) ([\d.\-]+)",
+                pcb, re.M,
+            )
+        )
+        self.assertEqual(len(pcb_stab_pts), 8)
+
+        # Recompute the plate's stabilizer cutout centers for the same layout
+        # and confirm every PCB stab lands exactly on one.
+        from plategen import Plate, PlateConfig, _stab_offsets, _stab_height_offset
+        from klepcbgenmod import _footprint_switch_offset
+        opts = gen.options
+        pitch = opts.key_pitch
+        origin = -0.5 * pitch
+        fdx, fdy = _footprint_switch_offset(opts.key_footprint)
+        cfg = PlateConfig()
+        cfg.stab_type = opts.plate_stab_type
+        cfg.stab_radius = opts.plate_stab_radius
+        cfg.stab_width = opts.plate_stab_width
+        cfg.stab_height = opts.plate_stab_height
+        cfg.stab_offset = opts.plate_stab_offset
+        plate = Plate(cfg)
+        for k in gen.keyboard.keys:
+            plate.add_key(origin + k.x_unit * pitch + fdx,
+                          origin + k.y_unit * pitch + fdy,
+                          k.width, k.height, rotation=getattr(k, "rot", 0))
+        plate_pts = set()
+        for poly in plate.cutouts:
+            xs = [pt[0] for pt in poly]
+            ys = [pt[1] for pt in poly]
+            w = max(xs) - min(xs)
+            h = max(ys) - min(ys)
+            # A stabilizer cutout is wider/taller than the 14mm switch cutout.
+            if w > 14.5 or h > 14.5:
+                plate_pts.add((round(sum(xs) / len(xs), 3),
+                               round(sum(ys) / len(ys), 3)))
+        self.assertEqual(len(plate_pts), 8)
+        self.assertEqual(pcb_stab_pts, plate_pts)
+
     def test_controller_limit(self):
         # A huge layout needing more lines than atmega32u4 provides should fail
         with self.assertRaises(ValueError):

@@ -552,6 +552,7 @@ class KLEPCBGenerator:
         diode = self.jinja_env.get_template(
             f"layout/diode_{self.options.diode_footprint}.tpl"
         )
+        stab = self.jinja_env.get_template("layout/stabilizer.tpl")
         component_count = 0
         components_section = ""
 
@@ -563,11 +564,29 @@ class KLEPCBGenerator:
         tracetpl = self.jinja_env.get_template("layout/trace.tpl")
         viatpl = self.jinja_env.get_template("layout/via.tpl")
 
+        # Stabilizer placement: mirror the plate's stabilizer cutout geometry so
+        # the PCB footprints land exactly where the plate cuts stabilizer holes.
+        # A key that is >=2u in width (or, if not wide, >=2u tall) gets a pair of
+        # stabilizer mounting holes at the SAME absolute coords the plate uses.
+        from plategen import PlateConfig, _stab_offsets, _stab_height_offset
+        stab_cfg = PlateConfig()
+        stab_cfg.stab_type = self.options.plate_stab_type
+        stab_cfg.stab_width = self.options.plate_stab_width
+        stab_cfg.stab_height = self.options.plate_stab_height
+        stab_cfg.stab_offset = self.options.plate_stab_offset
+        stab_offsets = _stab_offsets
+        stab_height = _stab_height_offset
+
         # Origin is zeroed so the top-left key's switch center sits at PCB (0,0).
         # The first key has x_unit/y_unit = 0.5 (its center), so shift by half a
         # key pitch to bring that center exactly onto the origin.
         key_origin_x = -0.5 * key_pitch
         key_origin_y = -0.5 * key_pitch
+
+        # Physical switch center offset (footprint origin -> physical switch).
+        # Plate cutouts are centered on the physical switch; stabilizer mounting
+        # holes must follow the same coordinate space to line up with the plate.
+        fdx, fdy = _footprint_switch_offset(self.options.key_footprint)
 
         # Diode placement offsets relative to the switch center, in mm.
         # These scale with key pitch so larger pitches keep the diode in place.
@@ -580,6 +599,37 @@ class KLEPCBGenerator:
             # Place switch
             ref_x = key_origin_x + key.x_unit * key_pitch
             ref_y = key_origin_y + key.y_unit * key_pitch
+
+            # Stabilizer mounting holes for keys that need them (>=2u on the
+            # axis that defines the key's size). Positioned at the physical
+            # switch center + the plate's stabilizer offsets, so they line up
+            # exactly with the plate cutouts.
+            stab_size = key.width if key.width >= 2 else key.height
+            if stab_size >= 2:
+                is_vertical = key.height >= 2 and key.width < 2
+                so = stab_offsets(stab_size, self.options.plate_stab_type)
+                ho = stab_height(self.options.plate_stab_type, stab_cfg)
+                # physical switch center (matches generate_plate)
+                pxc = ref_x + fdx
+                pyc = ref_y + fdy
+                for ox in so:
+                    sx = pxc + ox
+                    sy = pyc + ho
+                    if is_vertical:
+                        sx, sy = pxc + ho, pyc + ox
+                    components_section = (
+                        components_section
+                        + stab.render(
+                            num=component_count,
+                            x=round(sx, 3),
+                            y=round(sy, 3),
+                            size=stab_size,
+                            side="L" if ox < 0 else "R",
+                        )
+                        + "\n"
+                    )
+                    component_count += 1
+
             components_section = (
                 components_section
                 + switch.render(
