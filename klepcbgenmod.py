@@ -4,6 +4,7 @@ import sys
 import json
 import datetime
 import os
+import re
 
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -328,6 +329,7 @@ class KLEPCBGenerator:
         self.nets = Nets()
         self._controller_nudge = 0.0
         self._controller_anchor = None
+        self._footprint_lib = None  # lazily built by place_layout_components
 
     def generate_kicadproject(self, infile, outname):
         """Generate the kicad project. Main entry point"""
@@ -552,7 +554,6 @@ class KLEPCBGenerator:
         diode = self.jinja_env.get_template(
             f"layout/diode_{self.options.diode_footprint}.tpl"
         )
-        stab = self.jinja_env.get_template("layout/stabilizer.tpl")
         component_count = 0
         components_section = ""
 
@@ -563,6 +564,15 @@ class KLEPCBGenerator:
         matrixtpl = self.jinja_env.get_template("layout/matrixnetname.tpl")
         tracetpl = self.jinja_env.get_template("layout/trace.tpl")
         viatpl = self.jinja_env.get_template("layout/via.tpl")
+
+        # Stabilizer footprints: use the REAL footprint from an external repo
+        # (footprints.json) rather than the built-in placeholder. The raw
+        # .kicad_mod text has no (at x y) placement and a REF** placeholder, so
+        # we inject both at placement time.
+        from footprint_lib import FootprintLib
+        if self._footprint_lib is None:
+            self._footprint_lib = FootprintLib()
+        stab_fp_text = self._footprint_lib.stabilizer(self.options.key_footprint)
 
         # Stabilizer placement: mirror the plate's stabilizer cutout geometry so
         # the PCB footprints land exactly where the plate cuts stabilizer holes.
@@ -603,7 +613,8 @@ class KLEPCBGenerator:
             # Stabilizer mounting holes for keys that need them (>=2u on the
             # axis that defines the key's size). Positioned at the physical
             # switch center + the plate's stabilizer offsets, so they line up
-            # exactly with the plate cutouts.
+            # exactly with the plate cutouts. Each stem uses the real footprint
+            # from footprints.json, positioned and given a reference.
             stab_size = key.width if key.width >= 2 else key.height
             if stab_size >= 2:
                 is_vertical = key.height >= 2 and key.width < 2
@@ -619,12 +630,9 @@ class KLEPCBGenerator:
                         sx, sy = pxc + ho, pyc + ox
                     components_section = (
                         components_section
-                        + stab.render(
-                            num=component_count,
-                            x=round(sx, 3),
-                            y=round(sy, 3),
-                            size=stab_size,
-                            side="L" if ox < 0 else "R",
+                        + self._place_real_stab(
+                            stab_fp_text, component_count,
+                            round(sx, 3), round(sy, 3),
                         )
                         + "\n"
                     )
@@ -752,6 +760,24 @@ class KLEPCBGenerator:
                     prev = contact
 
         return components_section, component_count
+
+    def _place_real_stab(self, fp_text, num, x, y):
+        """Return the real stabilizer footprint text positioned at (x, y) with
+        a unique reference. The raw .kicad_mod from the external repo has no
+        `(at x y)` placement and a REF** reference placeholder; inject both.
+        The footprint is a standalone module block that we splice into the
+        layout as a top-level module."""
+        # Inject placement line after the module header `(module ... (tedit XX)`.
+        m = re.search(r"\(module\s+\S+\s+\(layer\s+\S+\)\s*\(tedit\s+\S+\)", fp_text)
+        if not m:
+            raise ValueError("stabilizer footprint has no module header to place")
+        header_end = m.end()
+        placed = (fp_text[:header_end]
+                  + f"\n    (at {x} {y})\n"
+                  + fp_text[header_end:])
+        # Replace the reference placeholder REF** with a real ref.
+        placed = re.sub(r"REF\*\*", f"STAB{num}", placed, count=1)
+        return placed
 
     def _switch_bbox(self):
         """Return (min_x, min_y, max_x, max_y) of the switch footprints in PCB

@@ -210,9 +210,10 @@ class TestGenerator(unittest.TestCase):
         gen = self._generate()
         pcb = open(os.path.join(self.workdir, "out.kicad_pcb")).read()
 
-        # Count stabilizer footprints placed on the board.
+        # Count stabilizer footprints placed on the board (the real
+        # MX_Stabilizer_Cutout from keebio-parts via footprints.json).
         stabs = re.findall(
-            r"^  \(module MountingHole:MountingHole_3\.5mm",
+            r"^  \(module MX_Stabilizer_Cutout |^\(module MX_Stabilizer_Cutout ",
             pcb, re.M,
         )
         # JB82 has 4 keys >=2u (2.0, 2.25x2, 6.25) -> 8 stabilizer holes (2 each).
@@ -222,7 +223,7 @@ class TestGenerator(unittest.TestCase):
         pcb_stab_pts = set(
             (round(float(x), 3), round(float(y), 3))
             for x, y in re.findall(
-                r"^  \(module MountingHole:MountingHole_3\.5mm[^\n]*\n\s*\(at ([\d.\-]+) ([\d.\-]+)",
+                r"^ {0,2}\(module MX_Stabilizer_Cutout[^\n]*\n\s*\(at ([\d.\-]+) ([\d.\-]+)",
                 pcb, re.M,
             )
         )

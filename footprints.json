@@ -1,0 +1,30 @@
+{
+  "comment": "External footprint repositories that klepcbgen pulls real KiCad footprints from, and which footprints to use for stabilizers. The generator shallow-clones each repo into ~/.klepcbgen/footprint-repos/ and uses the real .kicad_mod files instead of the built-in placeholder.",
+  "cache_dir": "~/.klepcbgen/footprint-repos",
+  "repos": {
+    "keebio": {
+      "git": "https://github.com/keebio/keebio-parts.pretty.git",
+      "ref": "master"
+    }
+  },
+  "stabilizers": {
+    "cherry_mx": {
+      "repo": "keebio",
+      "footprint": "MX_Stabilizer_Cutout.kicad_mod",
+      "per_stem": true,
+      "comment": "Single-stem MX stabilizer cutout; place one footprint per stem offset (plate's _stab_offsets) so it works for every key size. Stem offset (plate_stab_offset) applies from the physical switch center."
+    },
+    "alps": {
+      "repo": "keebio",
+      "footprint": "MX_Stabilizer_Cutout.kicad_mod",
+      "per_stem": true,
+      "comment": "Matias/Alps use the same MX stabilizer footprint geometry."
+    },
+    "choc": {
+      "repo": "keebio",
+      "footprint": "Kailh-PG1350-Stab-Cutout.kicad_mod",
+      "per_stem": false,
+      "comment": "Kailh Choc (PG1350) stabilizer cutout. Not yet verified for per-stem placement; choc stabs are rare."
+    }
+  }
+}
