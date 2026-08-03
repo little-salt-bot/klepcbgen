@@ -52,6 +52,21 @@ a keyboard designed using the Keyboard Layout Editor \
     )
 
     parser.add_argument(
+        "--diode-offset-x", dest="diode_offset_x", type=float, default=-5.8,
+        help="Diode placement X offset (mm) from each switch center.",
+    )
+
+    parser.add_argument(
+        "--diode-offset-y", dest="diode_offset_y", type=float, default=8.89,
+        help="Diode placement Y offset (mm) from each switch center.",
+    )
+
+    parser.add_argument(
+        "--diode-rotation", dest="diode_rotation", type=float, default=90.0,
+        help="Diode footprint rotation in degrees at placement.",
+    )
+
+    parser.add_argument(
         "--controller", dest="controller", choices=sorted(CONTROLLERS),
         default="atmega32u4",
         help="Target controller (affects control circuit + matrix pin mapping).",
@@ -70,11 +85,6 @@ a keyboard designed using the Keyboard Layout Editor \
     parser.add_argument(
         "--no-edge-cuts", dest="edge_cuts", action="store_false",
         help="Do not emit a board outline (Edge.Cuts).",
-    )
-
-    parser.add_argument(
-        "-n", dest="routing", action="store_false",
-        help='Do not add traces connecting matrix lines',
     )
 
     parser.add_argument(
@@ -100,11 +110,13 @@ if __name__ == "__main__":
         key_pitch=arguments.key_pitch,
         key_footprint=arguments.key_footprint,
         diode_footprint=arguments.diode_footprint,
+        diode_offset_x=arguments.diode_offset_x,
+        diode_offset_y=arguments.diode_offset_y,
+        diode_rotation=arguments.diode_rotation,
         controller=arguments.controller,
         edge_margin=arguments.edge_margin,
         edge_cuts=arguments.edge_cuts,
         edge_radius=arguments.edge_radius,
-        do_routing=arguments.routing,
         matrixfile=arguments.matrixfile,
         firmware_type=arguments.firmware_type,
     )

@@ -50,11 +50,29 @@ CONTROLLERS = {
     "rp2040": "RP2040",
 }
 
-# Available key switch footprints
+# Available key switch footprints.
+#   - 'cherry_mx' / 'alps' / 'choc' use the built-in stock KiCad template
+#     footprints (legacy behavior).
+#   - The 'mx_*' families are served from the external Hybrid-Switches repo
+#     (footprints.json -> switches.<family>). 'cherry_mx'/'alps'/'choc' remain
+#     for backward compat.
 KEY_FOOTPRINTS = {
-    "cherry_mx": "Cherry MX",
-    "alps": "Alps/Matias",
-    "choc": "Kailh Choc",
+    "cherry_mx": "Cherry MX (stock)",
+    "alps": "Alps/Matias (stock)",
+    "choc": "Kailh Choc (stock)",
+    "mx": "MX (Keebio)",
+    "mx_alps": "MX/Alps hybrid (Keebio)",
+    "mx_hotswap": "MX Hotswap SMD (Keebio)",
+    "mx_hotswap_antishear": "MX Hotswap SMD Anti-shear (Keebio)",
+    "mx_hotswap_outemu": "MX Hotswap Outemu SMD (Keebio)",
+}
+
+# Key switch families served from the external Hybrid-Switches repo
+# (footprints.json -> switches). Families here are placed as real .kicad_mod
+# footprints with nets injected on pads 1/2.
+EXTERNAL_SWITCH_FAMILIES = {
+    "mx", "mx_alps", "mx_hotswap",
+    "mx_hotswap_antishear", "mx_hotswap_outemu",
 }
 
 # Available diode footprints
@@ -124,6 +142,11 @@ def _footprint_switch_offset(key_footprint):
         library is not installed on this host).
     """
     fp = (key_footprint or "cherry_mx").lower()
+    # Keebio Hybrid-Switches footprints are centered on their origin: the
+    # (0,0) alignment hole IS the switch center, so no offset. This holds for
+    # all MX / MX-Alps / MX-hotswap families from that repo.
+    if fp in EXTERNAL_SWITCH_FAMILIES:
+        return (0.0, 0.0)
     if fp == "alps":
         return (-2.5, 4.5)
     if fp == "choc":
@@ -142,11 +165,14 @@ class GeneratorOptions:
     key_pitch: float = 19.05           # mm between switch centers
     key_footprint: str = "cherry_mx"   # KEY_FOOTPRINTS key
     diode_footprint: str = "0805"      # DIODE_FOOTPRINTS key
+    diode_offset_x: float = -5.8       # diode placement x offset (mm) from switch center
+    diode_offset_y: float = 8.89       # diode placement y offset (mm) from switch center
+    diode_rotation: float = 90.0       # diode footprint rotation (deg) at placement
     controller: str = "atmega32u4"     # CONTROLLERS key
     edge_margin: float = 3.0           # mm of board outline around switch bbox
     edge_cuts: bool = True             # emit an Edge.Cuts board outline
     edge_radius: float = 3.0           # mm corner radius on the board outline
-    do_routing: bool = True            # auto-route matrix lines
+    do_routing: bool = False           # auto-route matrix lines (default off; see roadmap)
     matrixfile: str = None             # path to emit matrix wiring JSON
     firmware_type: str = "both"        # none|qmk|zmk|both
 
@@ -548,9 +574,12 @@ class KLEPCBGenerator:
 
     def place_layout_components(self):
         """ Place footprint components, traces and vias """
-        switch = self.jinja_env.get_template(
-            f"layout/keyswitch_{self.options.key_footprint}.tpl"
-        )
+        is_external = self.options.key_footprint in EXTERNAL_SWITCH_FAMILIES
+        switch = None
+        if not is_external:
+            switch = self.jinja_env.get_template(
+                f"layout/keyswitch_{self.options.key_footprint}.tpl"
+            )
         diode = self.jinja_env.get_template(
             f"layout/diode_{self.options.diode_footprint}.tpl"
         )
@@ -599,10 +628,14 @@ class KLEPCBGenerator:
         fdx, fdy = _footprint_switch_offset(self.options.key_footprint)
 
         # Diode placement offsets relative to the switch center, in mm.
-        # These scale with key pitch so larger pitches keep the diode in place.
+        # These are user-configurable (diode_offset_x/y) and scale with key
+        # pitch so larger pitches keep the diode in place.
         s = key_pitch / 19.05
-        diode_offset = [-5.8 * s, 8.89 * s]                  # Position of the diode
-        diode_trace_offsets = [[-5.8 * s, 2.54 * s], [-5.8 * s, 7.77 * s]]
+        diode_offset = [
+            self.options.diode_offset_x * s,
+            self.options.diode_offset_y * s,
+        ]
+        diode_trace_offsets = [[diode_offset[0], 2.54 * s], [diode_offset[0], 7.77 * s]]
         # (matrix_b pad of the diode, used for chaining traces)
 
         for key in self.keyboard.keys:
@@ -638,22 +671,42 @@ class KLEPCBGenerator:
                     )
                     component_count += 1
 
-            components_section = (
-                components_section
-                + switch.render(
-                    num=component_count,
-                    legend=key.legend,
-                    x=ref_x,
-                    y=ref_y,
-                    diodenetnum=key.diodenetnum,
-                    diodenetname=diodetpl.render(diodenum=key.num),
-                    matrix_a_netnum=key.matrix_a_netnum,
-                    matrix_a_netname=matrixtpl.render(line=key.matrix_a),
-                    keywidth=unit_width_to_available_footprint(key.width),
-                    keyfootprint=self.options.key_footprint,
+            if is_external:
+                # Real keebio Hybrid-Switches footprint (served from
+                # footprints.json -> switches.<family>). Placed at the key
+                # center, given a unique reference, and its pad 1/2 wired to
+                # the matrix_a and diode nets.
+                width_bucket = unit_width_to_available_footprint(key.width)
+                sw_fp_text = self._footprint_lib.switch(
+                    self.options.key_footprint, width_bucket)
+                components_section = (
+                    components_section
+                    + self._place_real_switch(
+                        sw_fp_text, component_count, ref_x, ref_y,
+                        key.matrix_a_netnum,
+                        matrixtpl.render(line=key.matrix_a),
+                        key.diodenetnum,
+                        diodetpl.render(diodenum=key.num),
+                    )
+                    + "\n"
                 )
-                + "\n"
-            )
+            else:
+                components_section = (
+                    components_section
+                    + switch.render(
+                        num=component_count,
+                        legend=key.legend,
+                        x=ref_x,
+                        y=ref_y,
+                        diodenetnum=key.diodenetnum,
+                        diodenetname=diodetpl.render(diodenum=key.num),
+                        matrix_a_netnum=key.matrix_a_netnum,
+                        matrix_a_netname=matrixtpl.render(line=key.matrix_a),
+                        keywidth=unit_width_to_available_footprint(key.width),
+                        keyfootprint=self.options.key_footprint,
+                    )
+                    + "\n"
+                )
             # Place diode
             diode_x = ref_x + diode_offset[0]
             diode_y = ref_y + diode_offset[1]
@@ -663,6 +716,7 @@ class KLEPCBGenerator:
                     num=component_count,
                     x=diode_x,
                     y=diode_y,
+                    rotation=self.options.diode_rotation,
                     diodenetnum=key.diodenetnum,
                     diodenetname=diodetpl.render(diodenum=key.num),
                     matrix_b_netnum=key.matrix_b_netnum,
@@ -779,6 +833,46 @@ class KLEPCBGenerator:
         placed = re.sub(r"REF\*\*", f"STAB{num}", placed, count=1)
         return placed
 
+    def _place_real_switch(self, fp_text, num, x, y,
+                           matrix_a_netnum, matrix_a_netname,
+                           diodenetnum, diodenetname):
+        """Return a real keebio Hybrid-Switches .kicad_mod footprint positioned
+        at (x, y) with a unique reference and nets injected on the electrical
+        pads. These standalone files have no `(at x y)`, a REF** placeholder,
+        and NO net assignments on their pads, so we inject all three.
+
+        pad 1 -> matrix_a (switch contact A)
+        pad 2 -> diodenet (switch contact B -> diode)
+        Non-plated ("" np_thru_hole) pads are mounting/alignment holes and get
+        no net. Some footprints (MX-Alps hybrid) repeat pad 1/2 across layers;
+        every instance of the same pad number shares the same net."""
+        # Inject placement after the module header.
+        m = re.search(r"\(module\s+\S+\s+\(layer\s+\S+\)\s*\(tedit\s+\S+\)", fp_text)
+        if not m:
+            raise ValueError("switch footprint has no module header to place")
+        header_end = m.end()
+        placed = (fp_text[:header_end]
+                  + f"\n    (at {x} {y})\n"
+                  + fp_text[header_end:])
+        placed = re.sub(r"REF\*\*", f"K{num}", placed, count=1)
+
+        # Inject nets onto every electrical pad 1 / pad 2 line. Keebio pad
+        # lines are single-line and end with `))`. Mounting holes use `""` as
+        # the pad name and are skipped. Matrix netnames are bare (/Matrix_0);
+        # diode netnames are already quoted ("Net-(D0-Pad2)"), so preserve the
+        # exact name rather than re-wrapping it.
+        def _net_pad(m, netnum, netname):
+            line = m.group(0)
+            return line[:-1] + f' (net {netnum} {netname}))'
+
+        placed = re.sub(
+            r"\(pad 1 (smd|thru_hole)[^\n]*\)\)",
+            lambda m: _net_pad(m, matrix_a_netnum, matrix_a_netname), placed)
+        placed = re.sub(
+            r"\(pad 2 (smd|thru_hole)[^\n]*\)\)",
+            lambda m: _net_pad(m, diodenetnum, diodenetname), placed)
+        return placed
+
     def _switch_bbox(self):
         """Return (min_x, min_y, max_x, max_y) of the switch footprints in PCB
         mm. Each switch is treated as a SWITCH_HALF_SIZE-radius square around
@@ -856,7 +950,10 @@ class KLEPCBGenerator:
         key_origin_x = -0.5 * key_pitch
         key_origin_y = -0.5 * key_pitch
         s = key_pitch / 19.05
-        diode_offset = [-5.8 * s, 8.89 * s]
+        diode_offset = [
+            self.options.diode_offset_x * s,
+            self.options.diode_offset_y * s,
+        ]
         # Conservative footprint boxes: a key's body is width x height in units;
         # the diode (0805/0603/SOD-123) is ~3 x 2 mm including its pads.
         diode_half_w = 1.5 * s

@@ -1,5 +1,5 @@
   (module Diode_SMD:D_SOD-123 (layer B.Cu) (tedit 5B4B45C8) (tstamp 5E91CDF6)
-    (at {{x}} {{y}} 90)
+    (at {{x}} {{y}} {{rotation}})
     (descr "Diode SMD SOD-123")
     (tags "diode SOD-123")
     (path /DIODE_{{num}})

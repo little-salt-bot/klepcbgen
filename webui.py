@@ -280,6 +280,22 @@ def _index_html() -> str:
         </div>
       </div>
 
+      <h3 class="subhead">Diode placement</h3>
+      <div class="row">
+        <div>
+          <label for="diode_offset_x">Diode X offset (mm)</label>
+          <input id="diode_offset_x" type="number" step="0.1" value="-5.8">
+        </div>
+        <div>
+          <label for="diode_offset_y">Diode Y offset (mm)</label>
+          <input id="diode_offset_y" type="number" step="0.1" value="8.89">
+        </div>
+        <div>
+          <label for="diode_rotation">Diode rotation (°)</label>
+          <input id="diode_rotation" type="number" step="5" value="90">
+        </div>
+      </div>
+
       <div class="row">
         <div>
           <label for="pitch">Key pitch (mm)</label>
@@ -295,7 +311,6 @@ def _index_html() -> str:
         </div>
       </div>
 
-      <label class="check"><input id="routing" type="checkbox" checked> Auto-route traces</label>
       <label class="check"><input id="edgecuts" type="checkbox" checked> Board outline (Edge.Cuts)</label>
 
       <h3 class="subhead">Switch plate</h3>
@@ -418,10 +433,12 @@ def _index_html() -> str:
       controller: document.getElementById('controller').value,
       key_footprint: document.getElementById('keyfp').value,
       diode_footprint: document.getElementById('diodfp').value,
+      diode_offset_x: parseFloat(document.getElementById('diode_offset_x').value),
+      diode_offset_y: parseFloat(document.getElementById('diode_offset_y').value),
+      diode_rotation: parseFloat(document.getElementById('diode_rotation').value),
       key_pitch: parseFloat(document.getElementById('pitch').value),
       edge_margin: parseFloat(document.getElementById('margin').value),
       edge_radius: parseFloat(document.getElementById('radius').value),
-      do_routing: document.getElementById('routing').checked,
       edge_cuts: document.getElementById('edgecuts').checked,
       firmware_type: document.getElementById('firmware').value,
       plate_enabled: document.getElementById('plate_enabled').checked,
@@ -498,11 +515,14 @@ async def generate(payload: dict):
         key_pitch=float(payload.get("key_pitch", 19.05)),
         key_footprint=payload.get("key_footprint", "cherry_mx"),
         diode_footprint=payload.get("diode_footprint", "0805"),
+        diode_offset_x=float(payload.get("diode_offset_x", -5.8)),
+        diode_offset_y=float(payload.get("diode_offset_y", 8.89)),
+        diode_rotation=float(payload.get("diode_rotation", 90.0)),
         controller=payload.get("controller", "atmega32u4"),
         edge_margin=float(payload.get("edge_margin", 3.0)),
         edge_cuts=bool(payload.get("edge_cuts", True)),
         edge_radius=float(payload.get("edge_radius", 3.0)),
-        do_routing=bool(payload.get("do_routing", True)),
+        do_routing=bool(payload.get("do_routing", False)),
         firmware_type=payload.get("firmware_type", "both"),
         plate_enabled=bool(payload.get("plate_enabled", True)),
         plate_cutout=payload.get("plate_cutout", "MX"),
@@ -534,6 +554,9 @@ async def generate(payload: dict):
         key_pitch=options.key_pitch,
         key_footprint=options.key_footprint,
         diode_footprint=options.diode_footprint,
+        diode_offset_x=options.diode_offset_x,
+        diode_offset_y=options.diode_offset_y,
+        diode_rotation=options.diode_rotation,
         controller=options.controller,
         edge_margin=options.edge_margin,
         edge_cuts=options.edge_cuts,

@@ -89,3 +89,27 @@ class FootprintLib:
         key = (switch_type or "cherry_mx").lower()
         return self.config["stabilizers"].get(key) or \
             self.config["stabilizers"]["cherry_mx"]
+
+    # --- switch footprints -------------------------------------------------
+    def switch(self, family, width):
+        """Return the raw .kicad_mod text of the switch footprint for a given
+        family key and key width. `family` is a key of config['switches'];
+        `width` is a unit-width bucket from unit_width_to_available_footprint
+        (e.g. '1.00', '2.25', '6.25'). Falls back to the 1.00 footprint if the
+        family is unknown or the width bucket is missing."""
+        fam = self.config["switches"].get(family) or \
+            self.config["switches"].get("mx")
+        files = fam.get("files", {})
+        name = files.get(str(width), files.get("1.00"))
+        p = self._footprint_path(fam["repo"], name + ".kicad_mod")
+        if not os.path.isfile(p):
+            raise FileNotFoundError(
+                f"switch footprint '{name}.kicad_mod' not found in repo "
+                f"'{fam['repo']}' (looked at {p})")
+        with open(p, encoding="utf-8") as f:
+            return f.read()
+
+    def switch_meta(self, family):
+        """Return the config dict (repo/files/comment) for a switch family."""
+        return self.config["switches"].get(family) or \
+            self.config["switches"].get("mx")

@@ -1,5 +1,5 @@
   (module Diode_SMD:D_0603_1608Metric_Pad1.08x0.95mm_HandSolder (layer B.Cu) (tedit 5B4B45C8) (tstamp 5E91CDF6)
-    (at {{x}} {{y}} 90)
+    (at {{x}} {{y}} {{rotation}})
     (descr "Diode SMD 0603 (1608 Metric), hand soldering")
     (tags "diode handsolder")
     (path /DIODE_{{num}})

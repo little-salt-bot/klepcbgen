@@ -179,6 +179,53 @@ class TestGenerator(unittest.TestCase):
         self.assertIn("SW_Kailh_Choc", pcb)
         self.assertIn("D_0603", pcb)
 
+    def test_external_switch_families(self):
+        """Keebio Hybrid-Switches families are placed as real footprints with
+        nets injected on pads 1/2 and centered on the origin."""
+        for family in ("mx", "mx_alps", "mx_hotswap",
+                       "mx_hotswap_antishear", "mx_hotswap_outemu"):
+            with self.subTest(family=family):
+                gen = self._generate(key_footprint=family)
+                pcb = open(os.path.join(self.workdir, "out.kicad_pcb")).read()
+                # The real footprint module header appears on the board. These
+                # are MX / MX-Alps / MX-Hotswap-* module names.
+                self.assertRegex(pcb, r"\(module MX(?:-Alps|-Hotswap)?-")
+                # Pads 1/2 carry nets (matrix_a / diode). Matrix nets are bare
+                # (/Matrix_N), diode nets are quoted ("Net-(DN-Pad2)").
+                self.assertGreaterEqual(len(re.findall(r"\(net \d+ /Matrix_\d+\)\)", pcb)), 2)
+                self.assertGreaterEqual(len(re.findall(r"\(net \d+ \"Net-\(D\d+-Pad2\)\"\)\)", pcb)), 2)
+                # Switch center sits at origin for the top-left key.
+                m = re.search(r"\(module MX-\S+ \(layer F\.Cu\)[^\n]*\n\s*\(at ([\d.\-]+) ([\d.\-]+)\)", pcb)
+                self.assertIsNotNone(m)
+                self.assertAlmostEqual(float(m.group(1)), 0.0, places=3)
+                self.assertAlmostEqual(float(m.group(2)), 0.0, places=3)
+
+    def test_diode_offset_and_rotation(self):
+        """Custom diode offset + rotation are applied at placement."""
+        gen = self._generate(diode_offset_x=-4.0, diode_offset_y=6.0,
+                             diode_rotation=180)
+        pcb = open(os.path.join(self.workdir, "out.kicad_pcb")).read()
+        # Every diode module carries the custom rotation.
+        diods = re.findall(
+            r"\(module Diode_SMD:\S+ \(layer B\.Cu\)[^\n]*\n\s*\(at ([\d.\-]+) ([\d.\-]+) 180\)",
+            pcb)
+        self.assertGreater(len(diods), 0)
+        # First diode is offset by the configured amount from the first switch.
+        m = re.search(
+            r"\(module Diode_SMD:\S+ \(layer B\.Cu\)[^\n]*\n\s*\(at ([\d.\-]+) ([\d.\-]+) 180\)",
+            pcb)
+        dx, dy = float(m.group(1)), float(m.group(2))
+        self.assertAlmostEqual(dx, -4.0, places=2)
+        self.assertAlmostEqual(dy, 6.0, places=2)
+
+    def test_routing_off_by_default(self):
+        """Auto-routing is off by default; no vias are emitted (the auto-router
+        drops a via at each bend, and only it renders via.tpl). The control
+        circuit uses no vias either, so `(via ` is a clean signal."""
+        gen = self._generate()
+        pcb = open(os.path.join(self.workdir, "out.kicad_pcb")).read()
+        self.assertNotIn("(via ", pcb)
+
     def test_key_pitch(self):
         self._generate(key_pitch=18.0)
         pcb = open(os.path.join(self.workdir, "out.kicad_pcb")).read()

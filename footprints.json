@@ -1,9 +1,13 @@
 {
-  "comment": "External footprint repositories that klepcbgen pulls real KiCad footprints from, and which footprints to use for stabilizers. The generator shallow-clones each repo into ~/.klepcbgen/footprint-repos/ and uses the real .kicad_mod files instead of the built-in placeholder.",
+  "comment": "External footprint repositories that klepcbgen pulls real KiCad footprints from. The generator shallow-clones each repo into ~/.klepcbgen/footprint-repos/ and uses the real .kicad_mod files instead of the built-in placeholder templates.",
   "cache_dir": "~/.klepcbgen/footprint-repos",
   "repos": {
     "keebio": {
       "git": "https://github.com/keebio/keebio-parts.pretty.git",
+      "ref": "master"
+    },
+    "hybrid_switches": {
+      "git": "https://github.com/keebio/Hybrid-Switches.pretty.git",
       "ref": "master"
     }
   },
@@ -25,6 +29,78 @@
       "footprint": "Kailh-PG1350-Stab-Cutout.kicad_mod",
       "per_stem": false,
       "comment": "Kailh Choc (PG1350) stabilizer cutout. Not yet verified for per-stem placement; choc stabs are rare."
+    }
+  },
+  "switches": {
+    "mx": {
+      "repo": "hybrid_switches",
+      "comment": "Keebio MX through-hole switch footprints (KiCad 5 format, centered on origin, 0,0 = alignment hole). pad 1 = matrix A, pad 2 = diode. No 6.25u file exists, so wide keys fall back to 2.75u.",
+      "files": {
+        "1.00": "MX-1u",
+        "1.25": "MX-1.25u",
+        "1.50": "MX-1.5u",
+        "1.75": "MX-1.75u",
+        "2.00": "MX-2u",
+        "2.25": "MX-2.25u",
+        "2.75": "MX-2.75u",
+        "6.25": "MX-2.75u"
+      }
+    },
+    "mx_alps": {
+      "repo": "hybrid_switches",
+      "comment": "Keebio MX/Alps hybrid through-hole. Only 1u, 1.25u, 2u-ReversedStabilizers available. pad 1 = matrix A, pad 2 = diode.",
+      "files": {
+        "1.00": "MX-Alps-1u",
+        "1.25": "MX-Alps-1.25u",
+        "1.50": "MX-Alps-1u",
+        "1.75": "MX-Alps-1u",
+        "2.00": "MX-Alps-2u-ReversedStabilizers",
+        "2.25": "MX-Alps-2u-ReversedStabilizers",
+        "2.75": "MX-Alps-2u-ReversedStabilizers",
+        "6.25": "MX-Alps-2u-ReversedStabilizers"
+      }
+    },
+    "mx_hotswap": {
+      "repo": "hybrid_switches",
+      "comment": "Keebio MX hotswap SMD sockets. pad 1 = matrix A, pad 2 = diode.",
+      "files": {
+        "1.00": "MX-Hotswap-1u",
+        "1.25": "MX-Hotswap-1.25u",
+        "1.50": "MX-Hotswap-1.5u",
+        "1.75": "MX-Hotswap-1.75u",
+        "2.00": "MX-Hotswap-2u",
+        "2.25": "MX-Hotswap-2.25u",
+        "2.75": "MX-Hotswap-2.75u",
+        "6.25": "MX-Hotswap-2.75u"
+      }
+    },
+    "mx_hotswap_antishear": {
+      "repo": "hybrid_switches",
+      "comment": "Keebio MX hotswap SMD sockets with anti-shear support. pad 1 = matrix A, pad 2 = diode.",
+      "files": {
+        "1.00": "MX-Hotswap-1u-Antishear",
+        "1.25": "MX-Hotswap-1.25u-Antishear",
+        "1.50": "MX-Hotswap-1.5u-Antishear",
+        "1.75": "MX-Hotswap-1.75u-Antishear",
+        "2.00": "MX-Hotswap-2u-Antishear",
+        "2.25": "MX-Hotswap-2.25u-Antishear",
+        "2.75": "MX-Hotswap-2.75u-Antishear",
+        "6.25": "MX-Hotswap-2.75u-Antishear"
+      }
+    },
+    "mx_hotswap_outemu": {
+      "repo": "hybrid_switches",
+      "comment": "Keebio MX hotswap SMD sockets for Outemu switches (bottom-mounted pads on B.Cu). pad 1 = matrix A, pad 2 = diode.",
+      "files": {
+        "1.00": "MX-Hotswap-Outemu-1u",
+        "1.25": "MX-Hotswap-Outemu-1.25u",
+        "1.50": "MX-Hotswap-Outemu-1.5u",
+        "1.75": "MX-Hotswap-Outemu-1.75u",
+        "2.00": "MX-Hotswap-Outemu-2u",
+        "2.25": "MX-Hotswap-Outemu-2.25u",
+        "2.75": "MX-Hotswap-Outemu-2.75u",
+        "6.25": "MX-Hotswap-Outemu-2.75u"
+      }
     }
   }
 }
